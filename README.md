@@ -56,10 +56,10 @@ The script was tested only against stand-in `pct`/`pveam` commands (argument flo
 After you push a version tag (see below), the release workflow publishes `actual_companion.zip`, its checksum and `install-lxc.sh`. On the Proxmox node (replace OWNER/REPO; read the script before running it):
 
 ```
-curl -fsSLO https://github.com/OWNER/REPO/releases/latest/download/install-lxc.sh
+curl -fsSLO https://github.com/antczakb/actual-companion/releases/latest/download/install-lxc.sh
 less install-lxc.sh
 chmod +x install-lxc.sh
-./install-lxc.sh -u https://github.com/OWNER/REPO/releases/latest/download/actual_companion.zip -s local-lvm -a dhcp -v <your Actual version>
+./install-lxc.sh -u https://github.com/antczakb/actual-companion/releases/latest/download/actual_companion.zip -s local-lvm -a dhcp -v 26.11.0
 ```
 
 The script prints the zip's SHA-256; pass it as `-c <hash>` on later runs and updates to refuse any file that does not match. Private repo: create a fine-grained token with read access to the repo's contents, then `export DOWNLOAD_AUTH_HEADER='Authorization: Bearer <token>'` before running.
