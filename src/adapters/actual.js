@@ -3,8 +3,9 @@
 const cents = (n) => (n == null ? 0 : n / 100);
 
 export class ActualAdapter {
-  constructor({ serverUrl, password, syncId, budgetPassword, dataDir }) {
+  constructor({ serverUrl, password, syncId, budgetPassword, dataDir, loadApi }) {
     Object.assign(this, { serverUrl, password, syncId, budgetPassword, dataDir });
+    this.loadApi = loadApi || (() => import("@actual-app/api"));
     this._ready = null; this._chain = Promise.resolve(); this._lastSync = 0;
   }
   configured() { return !!(this.serverUrl && this.password && this.syncId); }
@@ -12,11 +13,15 @@ export class ActualAdapter {
   _init() {
     if (!this._ready) {
       this._ready = (async () => {
-        const m = await import("@actual-app/api");
+        const m = await this.loadApi();
         this.api = m.default?.init ? m.default : m;
         await this.api.init({ dataDir: this.dataDir, serverURL: this.serverUrl, password: this.password });
         await this.api.downloadBudget(this.syncId, this.budgetPassword ? { password: this.budgetPassword } : undefined);
-      })().catch((e) => { this._ready = null; throw e; });
+      })().catch((e) => {
+        this._ready = null;
+        if (/network-failure/i.test(e?.message || "")) throw new Error(`Could not reach the Actual server at ${this.serverUrl}. From inside this container, run: curl -sI ${this.serverUrl}  - and check the address, port and http/https.`);
+        throw e;
+      });
     }
     return this._ready;
   }

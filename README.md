@@ -51,18 +51,6 @@ Options: `-i` container ID (default next free), `-n` hostname, `-s` storage for 
 
 The script was tested only against stand-in `pct`/`pveam` commands (argument flow, update and error paths), not on a real Proxmox host. Read it before running it; it is short.
 
-### Install from GitHub releases (Proxmox)
-
-After you push a version tag (see below), the release workflow publishes `actual_companion.zip`, its checksum and `install-lxc.sh`. On the Proxmox node (replace OWNER/REPO; read the script before running it):
-
-```
-bash -c "$(curl -fsSL https://github.com/antczakb/actual-companion/releases/latest/download/install-lxc.sh)" install-lxc.sh -u https://github.com/antczakb/actual-companion/releases/latest/download/actual_companion.zip -s local-lvm -a dhcp -v 26.11.0
-```
-
-The script prints the zip's SHA-256; pass it as `-c <hash>` on later runs and updates to refuse any file that does not match. Private repo: create a fine-grained token with read access to the repo's contents, then `export DOWNLOAD_AUTH_HEADER='Authorization: Bearer <token>'` before running.
-
-Publishing a release: `git tag v0.1.0 && git push origin v0.1.0`. Never commit `.env` or `data/` (both are in `.gitignore`).
-
 ### Without Docker
 
 Node 20+ and `npm install`, set the same variables in your shell, then `npm start`.
@@ -90,6 +78,13 @@ Notes: matches need the same amount and a date within `venmo.dayWindow` days (de
 1. Create a free personal account at SnapTrade and put your client ID and consumer key in `.env`.
 2. Investments tab, **Connect a brokerage**, finish the login in the page that opens, then **Refresh from SnapTrade**.
 3. Check that your brokerages are on SnapTrade's supported list before relying on it.
+
+## Troubleshooting
+
+- **"Could not reach the Actual server"** (the log says `network-failure`): the container cannot connect to `ACTUAL_SERVER_URL`. From the Proxmox node run `pct exec <id> -- curl -sI <that URL>`. You should get an HTTP status line. Use the Actual server's LAN address and port (for example `http://192.168.1.10:5006`), with `http` or `https` matching how it is served. Restart the service after editing `/etc/actual-companion.env`.
+- **"Authentication failed" with a different reason**: wrong `ACTUAL_PASSWORD`.
+- **SnapTrade errors**: the message now includes the HTTP status and SnapTrade's reply. On the Investments tab, "Show response shape" prints the structure of SnapTrade's replies (key names and types only, no balances or names) so a parsing problem can be diagnosed without sharing your data.
+- **SnapTrade holdings**: SnapTrade's `getUserHoldings` is deprecated and returns 410 for accounts created after May 11, 2026. The app uses the positions and balances calls and falls back to the old one only when those are missing.
 
 ## Known limits
 

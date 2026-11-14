@@ -125,7 +125,9 @@ function investTab() {
   }
   refresh.addEventListener("click", async () => { refresh.disabled = true; try { const r = await api("/api/investments/refresh", { body: {} }); await load(); out.prepend(h("div", { class: "mute" }, `Recorded ${r.recorded} account(s) for ${r.date}.`)); } catch (e) { out.prepend(h("div", { class: "err" }, e.message)); } finally { refresh.disabled = false; } });
   connect.addEventListener("click", async () => { try { const r = await api("/api/snaptrade/connect"); window.open(r.url, "_blank", "noopener"); } catch (e) { out.prepend(h("div", { class: "err" }, e.message)); } });
-  root.append(h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept."))), out);
+  const shapeBtn = h("button", { class: "alt" }, "Show response shape");
+  shapeBtn.addEventListener("click", async () => { try { out.prepend(h("pre", { class: "card", style: "overflow:auto;max-height:300px" }, JSON.stringify(await api("/api/snaptrade/shape"), null, 1))); } catch (e) { out.prepend(h("div", { class: "err" }, e.message)); } });
+  root.append(h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, shapeBtn, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept."))), out);
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
 

@@ -40,21 +40,25 @@ export class SnapshotStore {
   }
 }
 
-// SnapTrade response shapes vary a little by SDK version; read the known variants defensively.
+// SnapTrade response shapes vary by SDK version and instrument type; read the known variants defensively.
+const first = (...xs) => xs.find((x) => x !== undefined && x !== null && x !== "");
 export function normalizeSnapTrade(accounts, holdingsByAccount) {
   return accounts.map((a) => {
-    const h = holdingsByAccount[a.id] || {};
-    const positions = (h.positions || []).map((p) => {
-      const sym = p.symbol?.symbol ?? p.symbol;
-      const ticker = (typeof sym === "object" ? sym?.symbol ?? sym?.raw_symbol : sym) || "";
-      const desc = (typeof sym === "object" ? sym?.description : "") || p.symbol?.description || "";
-      const units = Number(p.units ?? p.fractional_units ?? 0), price = Number(p.price ?? 0);
-      return { symbol: String(ticker), description: String(desc), units, price, value: +(units * price).toFixed(2) };
+    const id = a.id ?? a.account_id;
+    const h = holdingsByAccount[id] || {};
+    const list = Array.isArray(h.positions) ? h.positions : h.results || [];
+    const positions = list.map((p) => {
+      const sym = p.symbol?.symbol ?? p.symbol, ins = p.instrument || {};
+      const ticker = first(typeof sym === "object" ? first(sym?.symbol, sym?.raw_symbol) : sym, ins.symbol, ins.raw_symbol, ins.ticker, "");
+      const desc = first(p.symbol?.symbol?.description, p.symbol?.description, ins.description, ins.name, "");
+      const units = Number(first(p.units, p.quantity, p.fractional_units, 0)), price = Number(first(p.price, p.last_price, ins.price, 0));
+      const mv = first(p.market_value, p.value);
+      return { symbol: String(ticker), description: String(desc), units, price, value: +(mv !== undefined ? Number(mv) : units * price).toFixed(2) };
     });
-    const cash = (h.balances || []).reduce((s, b) => s + Number(b.cash ?? 0), 0);
-    const total = h.total_value?.value ?? a.balance?.total?.amount;
+    const bal = Array.isArray(h.balances) ? h.balances : h.balances ? [h.balances] : [];
+    const cash = bal.reduce((s, b) => s + Number(first(b.cash, b.amount, b.balance, 0)), 0);
+    const total = first(h.total_value?.value, a.balance?.total?.amount);
     const computed = positions.reduce((s, p) => s + p.value, 0) + cash;
-    const balance = Number(total ?? computed);
-    return { accountId: a.id, name: a.name || a.institution_name || a.id, institution: a.institution_name || "", balance, currency: a.balance?.total?.currency || h.total_value?.currency || "USD", cash, holdings: positions };
+    return { accountId: id, name: a.name || a.institution_name || id, institution: a.institution_name || "", balance: Number(total ?? computed), currency: a.balance?.total?.currency || h.total_value?.currency || "USD", cash, holdings: positions };
   });
 }

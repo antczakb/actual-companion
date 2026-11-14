@@ -87,6 +87,11 @@ export function createHandlers(d) {
       return { url: await snaptrade.connectUrl() };
     },
 
+    "GET /api/snaptrade/shape": async () => {
+      if (!snaptrade?.configured()) throw httpErr(400, "SnapTrade is not configured.");
+      return { note: "Key names and types only; no values.", accounts: await snaptrade.responseShape() };
+    },
+
     "GET /api/simplefin": async ({ query }) => {
       const s = settings.get().simplefin;
       const r = await getSimpleFIN({ accessUrl: simplefin.accessUrl, cachePath: simplefin.cachePath, ttlHours: s.cacheHours, refresh: query.refresh === "1",
