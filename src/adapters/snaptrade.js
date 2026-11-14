@@ -30,8 +30,8 @@ export class SnapTradeAdapter {
     if (!this.sdk) {
       const m0 = await this.loadSdk();
       const m = m0.Snaptrade ? m0 : (m0.default || m0);
-      const cfg = m.SnaptradeAuth?.commercialApiKey
-        ? { auth: m.SnaptradeAuth.commercialApiKey({ clientId: this.clientId, consumerKey: this.consumerKey }) } // current SDK
+      const cfg = m.SnaptradeAuth?.personalApiKey
+        ? { auth: m.SnaptradeAuth.personalApiKey({ clientId: this.clientId, consumerKey: this.consumerKey }) } // current SDK
         : { clientId: this.clientId, consumerKey: this.consumerKey };                                              // older SDK
       this.sdk = new m.Snaptrade(cfg);
     }
