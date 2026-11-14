@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Actual companion</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>Actual companion</h1>
+  <nav id="tabs" role="tablist">
+    <button data-tab="loan" class="on">Loan</button>
+    <button data-tab="budget">Budget</button>
+    <button data-tab="invest">Investments</button>
+    <button data-tab="simplefin">SimpleFIN</button>
+    <button data-tab="venmo">Venmo</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+  <span id="status"></span>
+</header>
+<main>
+  <section id="loan"></section>
+  <section id="budget" hidden></section>
+  <section id="invest" hidden></section>
+  <section id="simplefin" hidden></section>
+  <section id="venmo" hidden></section>
+  <section id="settings" hidden></section>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

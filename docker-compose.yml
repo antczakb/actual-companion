@@ -1,0 +1,12 @@
+services:
+  companion:
+    build:
+      context: .
+      args:
+        ACTUAL_API_VERSION: ${ACTUAL_API_VERSION:-}
+    env_file: .env
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

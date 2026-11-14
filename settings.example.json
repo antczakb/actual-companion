@@ -1,0 +1,5 @@
+{
+  "loan": { "product": "HELOC", "homeValue": 750000, "mortgage": 310000, "cushion": 2000, "roundTo": 1000 },
+  "projection": { "purchases": [ { "month": "2027-06", "amount": 60000, "name": "Kitchen" } ], "reserveMonths": 3 },
+  "venmo": { "keywordCategories": { "rent": "Housing: Rent" } }
+}

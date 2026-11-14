@@ -1,0 +1,23 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test
+      - name: Build the zip the installer expects
+        run: git archive --format=zip -o actual_companion.zip HEAD src public package.json README.md Dockerfile docker-compose.yml .env.example settings.example.json
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum actual_companion.zip | tee actual_companion.zip.sha256
+          gh release create "$GITHUB_REF_NAME" actual_companion.zip actual_companion.zip.sha256 deploy/install-lxc.sh --generate-notes
