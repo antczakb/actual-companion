@@ -30,10 +30,28 @@ export class SnapTradeAdapter {
     if (!this.sdk) {
       const m0 = await this.loadSdk();
       const m = m0.Snaptrade ? m0 : (m0.default || m0);
-      const cfg = m.SnaptradeAuth?.personalApiKey
-        ? { auth: m.SnaptradeAuth.personalApiKey({ clientId: this.clientId, consumerKey: this.consumerKey }) } // current SDK
-        : { clientId: this.clientId, consumerKey: this.consumerKey };                                              // older SDK
-      this.sdk = new m.Snaptrade(cfg);
+      
+      if (m.SnaptradeAuth?.personalApiKey) {
+        this.isPersonalKey = true;
+        this.sdk = new m.Snaptrade({
+          auth: m.SnaptradeAuth.personalApiKey({
+            clientId: this.clientId,
+            consumerKey: this.consumerKey,
+          }),
+        });
+      } else if (m.SnaptradeAuth?.commercialApiKey) {
+        this.sdk = new m.Snaptrade({
+          auth: m.SnaptradeAuth.commercialApiKey({
+            clientId: this.clientId,
+            consumerKey: this.consumerKey,
+          }),
+        });
+      } else {
+        this.sdk = new m.Snaptrade({
+          clientId: this.clientId,
+          consumerKey: this.consumerKey,
+        });
+      }
     }
     return this.sdk;
   }
@@ -42,6 +60,7 @@ export class SnapTradeAdapter {
     let u = this._user();
     if (u) return u;
     const sdk = await this._sdk();
+    if (this.isPersonalKey) return {};
     const r = unwrap(await sdk.authentication.registerSnapTradeUser({ userId: this.userId }));
     if (!r?.userSecret) throw new Error("SnapTrade did not return a user secret. If this user was registered before, delete it in the SnapTrade dashboard and try again.");
     u = { userId: r.userId || this.userId, userSecret: r.userSecret };
@@ -54,7 +73,8 @@ export class SnapTradeAdapter {
   async connectUrl() {
     try {
       const sdk = await this._sdk(), u = await this._ensureUser();
-      const r = unwrap(await sdk.authentication.loginSnapTradeUser({ userId: u.userId, userSecret: u.userSecret }));
+      const creds = await this._ensureUser();
+      const r = unwrap(await sdk.authentication.loginSnapTradeUser(creds));
       const url = typeof r === "string" ? r : r?.redirectURI || r?.redirect_uri;
       if (!url) throw new Error("SnapTrade returned no connection URL.");
       return url;
@@ -63,7 +83,7 @@ export class SnapTradeAdapter {
 
   async _fetchRaw() {
     const sdk = await this._sdk(), u = await this._ensureUser();
-    const creds = { userId: u.userId, userSecret: u.userSecret };
+    const creds = await this._ensureUser();
     const list = unwrap(await sdk.accountInformation.listUserAccounts(creds));
     const accounts = Array.isArray(list) ? list : list?.results || [];
     const out = [];
