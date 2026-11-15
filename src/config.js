@@ -44,6 +44,20 @@ export function validateSettings(s) {
   for (const k of ["homeValue", "mortgage", "otherLiens"]) num(L[k], `loan.${k}`, 0);
   for (const k of ["homeValueAccount", "mortgageAccount", "otherLiensAccount"]) if (L[k] != null && typeof L[k] !== "string") errs.push(`loan.${k} must be an account name or null`);
   (s.projection?.purchases || []).forEach((p, i) => { if (!/^\d{4}-\d{2}$/.test(p.month || "")) errs.push(`projection.purchases[${i}].month must look like 2027-06`); num(+p.amount, `projection.purchases[${i}].amount`, 0); });
+  const P = s.projection || {};
+  num(P.trailingMonths, "projection.trailingMonths", 1, 60); num(P.reserveMonths, "projection.reserveMonths", 0, 36);
+  num(P.incomeGrowthPct, "projection.incomeGrowthPct", -50, 100); num(P.expenseInflationPct, "projection.expenseInflationPct", -50, 100);
+  if (P.reserveFixed != null) num(P.reserveFixed, "projection.reserveFixed", 0);
+  if (!Array.isArray(P.cashAccounts) || P.cashAccounts.some((x) => typeof x !== "string")) errs.push("projection.cashAccounts must be a list of account names");
+  const B = s.budget || {};
+  num(B.trailingMonths, "budget.trailingMonths", 1, 60); num(B.tolerancePct, "budget.tolerancePct", 0, 1); num(B.toleranceDollars, "budget.toleranceDollars", 0);
+  for (const k of ["excludeGroups", "excludeCategories"]) if (!Array.isArray(B[k]) || B[k].some((x) => typeof x !== "string")) errs.push(`budget.${k} must be a list of names`);
+  const V = s.venmo || {};
+  num(V.dayWindow, "venmo.dayWindow", 0, 31);
+  try { new RegExp(V.payeeRegex || "", "i"); } catch { errs.push("venmo.payeeRegex is not a valid pattern"); }
+  if (!V.keywordCategories || typeof V.keywordCategories !== "object" || Object.values(V.keywordCategories).some((x) => typeof x !== "string")) errs.push("venmo.keywordCategories must map words to category names");
+  const F = s.simplefin || {};
+  num(F.startDaysBack, "simplefin.startDaysBack", 1, 365); num(F.cacheHours, "simplefin.cacheHours", 0, 168);
   return errs;
 }
 

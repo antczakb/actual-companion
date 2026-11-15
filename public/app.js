@@ -114,6 +114,14 @@ const TIPS = {
 const VERDICT_LABEL = { ok: "Works", "none-needed": "Not needed", caution: "Caution", equity: "Not enough home equity", infeasible: "Payments too high" };
 async function loanTab() {
   const root = $("loan"), out = h("div"), msg = h("div");
+  settingsBar(root, { fields: [
+    { path: "projection.cashAccounts", type: "accounts", label: "Accounts counted as cash", hint: "Leave all unticked to use every on-budget account.", tip: "Starting cash for the projection is the total balance of the accounts ticked here." },
+    { path: "projection.trailingMonths", type: "number", label: "Months of history to average", tip: "Income, spending and investing are averaged over this many past months of Actual transactions." },
+    { path: "projection.incomeGrowthPct", type: "number", label: "Income growth per year (%)" },
+    { path: "projection.expenseInflationPct", type: "number", label: "Spending growth per year (%)" },
+    { path: "projection.reserveFixed", type: "number", nullable: true, label: "Fixed reserve ($)", hint: "Blank = reserve months x spending (set in step 2).", tip: "If set, this dollar amount is the reserve instead of reserve months x monthly spending." },
+    { path: "loan.roundTo", type: "number", label: "Round loan up to nearest ($)" },
+  ], extra: actualCheck });
   let S = await api("/api/settings"), selected = S.loan.product, accts = [], acctNote = "";
   try { accts = await api("/api/accounts"); } catch (e) { acctNote = "Could not read accounts from Actual (" + e.message + "). Enter values by hand."; }
   const purchases = S.projection.purchases.map((p) => ({ ...p })), products = S.loan.products.map((p) => ({ ...p }));
@@ -145,7 +153,11 @@ async function loanTab() {
     const sel = h("select", { class: "in" }, h("option", { value: "" }, "Custom value"), accts.map((a) => h("option", { value: a.name }, `${a.name} (${usd(a.balance)})`)));
     if (account && !accts.some((a) => a.name === account)) sel.append(h("option", { value: account }, account + " (not found in Actual)"));
     const num = inp("number", customVal, (e) => { customVal = +e.value || 0; }, { min: 0 });
-    const sync = () => { const a = accts.find((x) => x.name === sel.value); num.disabled = !!sel.value; num.value = a ? (liability ? Math.abs(a.balance) : Math.max(0, a.balance)) : customVal; };
+    const sync = () => {
+      const a = accts.find((x) => x.name === sel.value);
+      if (a) { num.type = "text"; num.value = usd(liability ? Math.abs(a.balance) : Math.max(0, a.balance)); num.disabled = true; } // shown as dollars, read-only
+      else { num.type = "number"; num.value = customVal; num.disabled = false; }
+    };
     sel.value = account || ""; sel.addEventListener("change", sync); sync();
     return { sel, num, get account() { return sel.value || null; }, get custom() { return customVal; } };
   };
@@ -225,6 +237,7 @@ async function loanTab() {
   const adv = { loan: inp("number", "", () => {}, { min: 0, placeholder: "blank = suggested" }), draw: inp("month", "", () => {}) };
 
   async function save() {
+    S = await api("/api/settings"); // pick up anything changed in this tab's Settings panel
     const s = structuredClone(S);
     s.projection.purchases = purchases.filter((p) => p.month || +p.amount).map((p) => ({ name: p.name || "", month: p.month, amount: +p.amount || 0 }));
     s.loan.products = products.map((p) => ({ ...p, name: (p.name || "").trim() }));
@@ -330,6 +343,13 @@ async function loanTab() {
 
 // ---------- Budget ----------
 function budgetTab() {
+  settingsBar($("budget"), { fields: [
+    { path: "budget.trailingMonths", type: "number", label: "Months of history" },
+    { path: "budget.tolerancePct", type: "number", scale: 100, label: "Tolerance (%)", hint: "Differences smaller than this are marked OK.", tip: "A suggestion within this percentage (or the dollar amount below) of the current budget is marked OK rather than flagged." },
+    { path: "budget.toleranceDollars", type: "number", label: "Tolerance ($)" },
+    { path: "budget.excludeGroups", type: "list", label: "Skip these category groups" },
+    { path: "budget.excludeCategories", type: "list", label: "Skip these categories" },
+  ], extra: actualCheck });
   const root = $("budget"), out = h("div"), month = h("input", { type: "month" }), go = h("button", { class: "act" }, "Suggest");
   async function run() {
     await busy(go, out, async () => {
@@ -373,12 +393,17 @@ function investTab() {
       showShape(h("div", { class: "card" }, h("div", { class: "row" }, h("b", {}, "SnapTrade response shape (names and types only)"), h("button", { class: "alt", onclick: () => showShape() }, "Close")), h("pre", { style: "overflow:auto;max-height:300px;margin:8px 0 0" }, JSON.stringify(r, null, 1))));
     } catch (e) { showShape(h("div", { class: "err" }, e.message), h("button", { class: "alt", onclick: () => showShape() }, "Close")); } finally { shapeBtn.disabled = false; }
   });
-  root.append(h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, shapeBtn, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept."))), shapeBox, out);
+  settingsBar(root, { extra: () => h("div", { class: "row actions" }, shapeBtn, h("span", { class: "mute" }, "Diagnostic: shows the names and types of fields SnapTrade returns (no balances or account numbers), useful if a brokerage looks wrong.")) });
+  root.append(h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept."))), shapeBox, out);
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
 
 // ---------- SimpleFIN ----------
 function simplefinTab() {
+  settingsBar($("simplefin"), { fields: [
+    { path: "simplefin.startDaysBack", type: "number", label: "Days of history to fetch" },
+    { path: "simplefin.cacheHours", type: "number", label: "Reuse the last fetch for (hours)", hint: "SimpleFIN limits how often you can pull.", tip: "Within this many hours the app shows the saved copy instead of calling SimpleFIN again." },
+  ] });
   const root = $("simplefin"), out = h("div"), go = h("button", { class: "act" }, "Load (cached)"), force = h("button", { class: "alt" }, "Fetch fresh from SimpleFIN");
   async function run(fresh) {
     await busy(fresh ? force : go, out, async () => {
@@ -401,6 +426,11 @@ function simplefinTab() {
 
 // ---------- Venmo ----------
 function venmoTab() {
+  settingsBar($("venmo"), { fields: [
+    { path: "venmo.dayWindow", type: "number", label: "Match within (days)", hint: "How far apart the bank and statement dates may be.", tip: "A Venmo statement row matches a bank transaction when the amounts are equal to the cent and the dates are within this many days." },
+    { path: "venmo.payeeRegex", type: "text", label: "Bank payee pattern", hint: "Bank rows whose payee matches this are treated as Venmo.", tip: "A pattern (case-insensitive) matched against the bank payee name. 'venmo' catches payees containing that word." },
+    { path: "venmo.keywordCategories", type: "kv", label: "Categorize by keyword", kvLabels: ["Word in the note", "Actual category name"], hint: "If a Venmo note contains the word, use that category when none is already set." },
+  ], extra: actualCheck });
   const root = $("venmo"), out = h("div"), file = h("input", { type: "file", accept: ".csv,text/csv" }), area = h("textarea", { rows: 4, placeholder: "...or paste the CSV text here", style: "width:100%" }), go = h("button", { class: "act" }, "Preview matches");
   let csv = "";
   file.addEventListener("change", async () => { const f = file.files[0]; if (f) { csv = await f.text(); area.value = ""; } });
@@ -434,19 +464,60 @@ function venmoTab() {
   root.append(h("div", { class: "card" }, h("div", { class: "mute", style: "margin-bottom:8px" }, "On venmo.com: Statements, pick a month, Download CSV. Preview shows what would change; nothing is written until you press Apply."), h("div", { class: "row" }, file, go), area), out);
 }
 
-// ---------- Settings ----------
-function settingsTab() {
-  const root = $("settings"), ta = h("textarea", { class: "json", spellcheck: "false" }), msg = h("div"), save = h("button", { class: "act" }, "Save settings");
-  api("/api/settings").then((s) => (ta.value = JSON.stringify(s, null, 2)));
-  save.addEventListener("click", async () => { try { ta.value = JSON.stringify(await api("/api/settings", { method: "PUT", body: JSON.parse(ta.value) }), null, 2); msg.replaceChildren(h("div", {}, "Saved.")); } catch (e) { msg.replaceChildren(h("div", { class: "err" }, e.message)); } });
-  const chk = h("button", { class: "alt" }, "Test connection to Actual"), chkOut = h("span", { class: "mute" });
-  chk.addEventListener("click", async () => { chk.disabled = true; chkOut.textContent = "Testing..."; try { const r = await api("/api/actual/check"); chkOut.textContent = r.message; chkOut.className = r.ok ? "" : "err"; } catch (e) { chkOut.textContent = e.message; chkOut.className = "err"; } finally { chk.disabled = false; } });
-  root.append(h("div", { class: "card row" }, chk, chkOut), h("div", { class: "card mute" }, "Loan products, home value, planned purchases ({\"month\":\"2027-06\",\"amount\":60000,\"name\":\"Kitchen\"}), reserve and tolerance settings. Rates are decimals (0.08 = 8%)."), ta, h("div", { class: "row", style: "margin:10px 0" }, save), msg);
+// ---------- Per-tab settings ----------
+// Each tab has its own "Settings" button that opens a form for the settings that tab uses.
+// fields: {path, label, type: number|text|list|accounts|kv, scale?, nullable?, hint?, tip?, kvLabels?}
+function settingsBar(root, { fields = [], extra = null, title = "Settings" } = {}) {
+  const btn = h("button", { class: "alt gear", "aria-expanded": "false" }, "⚙ " + title), box = h("div", { class: "card settings", hidden: true });
+  let built = false, readers = [];
+  const getPath = (o, p) => p.split(".").reduce((a, k) => (a == null ? a : a[k]), o);
+  const setPath = (o, p, v) => { const ks = p.split("."), last = ks.pop(); ks.reduce((a, k) => a[k], o)[last] = v; };
+  async function build() {
+    const S = await api("/api/settings"); let accts = [];
+    if (fields.some((f) => f.type === "accounts")) { try { accts = (await api("/api/accounts")).filter((a) => !a.offbudget); } catch { accts = []; } }
+    readers = []; const msg = h("div"), grid = h("div", { class: "row fields" });
+    for (const f of fields) {
+      const v = getPath(S, f.path), scale = f.scale || 1; let el, read;
+      if (f.type === "number") { el = h("input", { type: "number", class: "in", step: "any", inputmode: "decimal", value: v == null ? "" : Math.round(v * scale * 1e6) / 1e6, placeholder: f.nullable ? "none" : "" }); read = () => (el.value === "" ? (f.nullable ? null : 0) : Number(el.value) / scale); }
+      else if (f.type === "text") { el = h("input", { type: "text", class: "in", value: v || "" }); read = () => el.value; }
+      else if (f.type === "list") { el = h("input", { type: "text", class: "in", value: (v || []).join(", "), placeholder: "separate with commas" }); read = () => el.value.split(",").map((x) => x.trim()).filter(Boolean); }
+      else if (f.type === "accounts") {
+        const chosen = new Set(v || []); const boxes = accts.map((a) => { const c = h("input", { type: "checkbox" }); c.checked = chosen.has(a.name); return { a, c }; });
+        el = h("div", { class: "checks" }, boxes.length ? boxes.map(({ a, c }) => h("label", { class: "check" }, c, `${a.name} (${usd(a.balance)})`)) : h("span", { class: "mute" }, "No accounts available from Actual."));
+        read = () => boxes.filter(({ c }) => c.checked).map(({ a }) => a.name);
+      } else if (f.type === "kv") {
+        const rows = Object.entries(v || {}).map(([k, val]) => ({ k, val })), holder = h("div", { class: "kv" });
+        const draw = () => fill(holder, rows.map((r, i) => h("div", { class: "kvrow" }, h("input", { type: "text", class: "in", value: r.k, placeholder: f.kvLabels?.[0] || "word", oninput: (e) => (r.k = e.target.value) }), h("input", { type: "text", class: "in", value: r.val, placeholder: f.kvLabels?.[1] || "category", oninput: (e) => (r.val = e.target.value) }), h("button", { class: "alt", onclick: () => { rows.splice(i, 1); draw(); } }, "Remove"))),
+          h("button", { class: "alt", onclick: () => { rows.push({ k: "", val: "" }); draw(); } }, "+ Add"));
+        draw(); el = holder; read = () => Object.fromEntries(rows.filter((r) => r.k.trim() && r.val.trim()).map((r) => [r.k.trim(), r.val.trim()]));
+      }
+      readers.push([f.path, read]);
+      grid.append(h("label", { class: "setfield" + (f.type === "accounts" || f.type === "kv" ? " wide" : "") }, h("span", { class: "lbl" }, f.label, f.tip ? tip(f.tip) : null), el, f.hint ? h("small", { class: "mute" }, f.hint) : null));
+    }
+    const save = h("button", { class: "act" }, "Save settings");
+    save.addEventListener("click", async () => {
+      save.disabled = true; fill(msg);
+      try { const cur = await api("/api/settings"); for (const [path, read] of readers) setPath(cur, path, read()); await api("/api/settings", { method: "PUT", body: cur }); fill(msg, h("div", { class: "ok" }, "Saved. Run the calculation again to use the new values.")); }
+      catch (e) { fill(msg, h("div", { class: "err" }, e.message)); } finally { save.disabled = false; }
+    });
+    fill(box, fields.length ? grid : null, extra ? extra() : null, fields.length ? h("div", { class: "row actions" }, save) : null, msg);
+  }
+  btn.addEventListener("click", async () => {
+    const open = box.hidden; box.hidden = !open; btn.setAttribute("aria-expanded", String(open));
+    if (open && !built) { built = true; try { await build(); } catch (e) { fill(box, h("div", { class: "err" }, e.message)); built = false; } }
+  });
+  root.append(h("div", { class: "toolbar" }, btn), box);
+}
+// "Test connection to Actual" button, used in the settings of the tabs that read Actual.
+function actualCheck() {
+  const chk = h("button", { class: "alt" }, "Test connection to Actual"), out = h("span", { class: "mute" });
+  chk.addEventListener("click", async () => { chk.disabled = true; out.textContent = "Testing..."; out.className = "mute"; try { const r = await api("/api/actual/check"); out.textContent = r.message; out.className = r.ok ? "ok" : "err"; } catch (e) { out.textContent = e.message; out.className = "err"; } finally { chk.disabled = false; } });
+  return h("div", { class: "row actions" }, chk, out);
 }
 
 // ---------- shell ----------
 const loaded = {};
-const inits = { loan: loanTab, budget: budgetTab, invest: investTab, simplefin: simplefinTab, venmo: venmoTab, settings: settingsTab };
+const inits = { loan: loanTab, budget: budgetTab, invest: investTab, simplefin: simplefinTab, venmo: venmoTab };
 async function show(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("main section").forEach((s) => (s.hidden = s.id !== name));

@@ -128,3 +128,16 @@ textarea.json { width:100%; min-height:480px; font:12px/1.4 ui-monospace, Menlo,
 }
 @media (prefers-reduced-motion: no-preference) { details > summary { transition:color .15s; } }
 td:first-child input[type=text] { min-width:140px; }
+
+.toolbar { display:flex; justify-content:flex-end; margin:0 0 6px; }
+button.gear { border-color:var(--line); color:var(--mute); }
+button.gear[aria-expanded="true"] { background:var(--tint); color:var(--acc); border-color:var(--acc); }
+.card.settings { margin-top:0; }
+.ok { color:var(--ok); margin:6px 0; }
+.setfield.wide { flex:1 1 100%; max-width:none; }
+.checks { display:flex; flex-wrap:wrap; gap:6px 18px; }
+label.check { flex-direction:row; align-items:center; gap:8px; font-size:14px; color:var(--ink); }
+.kv { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
+.kvrow { display:flex; gap:8px; flex-wrap:wrap; width:100%; }
+.kvrow input { flex:1 1 180px; }
+@media (max-width:720px) { .toolbar { margin-top:2px; } .kvrow button { flex:1 1 100%; } }

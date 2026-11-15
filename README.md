@@ -9,7 +9,7 @@ A small web app that sits beside your Actual Budget server and reads it through 
 | **Investments** | Pulls balances and holdings from SnapTrade into snapshots kept by this app (not in Actual's ledger) and charts the total over time. |
 | **SimpleFIN** | Shows every field SimpleFIN sends, as tables (accounts and transactions), so you can see what detail exists. |
 | **Venmo** | Upload a Venmo statement CSV; matches each payment to the bank's "VENMO PAYMENT" row and proposes the real payee, note and category. Nothing is written until you press Apply. |
-| **Settings** | Loan products, home value, mortgage, planned purchases, reserve, tolerances (JSON). |
+| **Settings button** (top right of each tab) | That tab's options as a form: cash accounts and growth (Loan), tolerances (Budget), match window and keywords (Venmo), fetch window (SimpleFIN). |
 
 ## What was tested, and what was not
 
@@ -58,8 +58,8 @@ Node 20+ and `npm install`, set the same variables in your shell, then `npm star
 ## First-run checks (about 15 minutes)
 
 1. **Status line** at the top right should say Actual configured. If a tab shows an error, it is usually the Sync ID, the password, or an API version that does not match the server.
-2. **Loan tab, "based on N months"** should match how much history you imported (25 months for you). Cash today should equal your on-budget account balances. If it is off, set `projection.cashAccounts` in Settings to the accounts you count as cash.
-3. **Settings:** enter `loan.homeValue`, `loan.mortgage`, your real loan quotes under `loan.products`, and planned purchases, for example `{"month":"2027-06","amount":60000,"name":"Kitchen"}`. Until then the page warns you.
+2. **Loan tab, "based on N months"** should match how much history you imported (25 months for you). Cash today should equal your on-budget account balances. If it is off, open Settings on the Loan tab and tick the accounts you count as cash.
+3. **Loan tab:** pick your house and mortgage accounts (or type values), enter your real loan quotes and planned purchases in steps 1 to 3. Until then the page warns you.
 4. **Compare one number with the workbook:** use the same inputs and the Loan_Planner's suggested loan should agree. If it does not, tell me both sets of inputs.
 5. **SimpleFIN tab:** look at the columns for your Venmo-related transactions. Anything beyond `description` is new information.
 6. **Budget tab:** check that "uncategorized" is small. Uncategorized spending is left out of the suggestions, and counted as spending in the loan projection.
@@ -71,7 +71,7 @@ Node 20+ and `npm install`, set the same variables in your shell, then `npm star
 3. Review: each row shows what the bank says, the payee and note that would be set, and a category (from your past payments to that person, or from keywords in the note, or the category it already has). Change any category in the dropdown, untick rows you do not want.
 4. Apply selected to Actual.
 
-Notes: matches need the same amount and a date within `venmo.dayWindow` days (default 5, for ACH delay). Each updated bank row gets a marker like `[venmo:12345]` in its notes so a second run never touches it twice. Payments made from your Venmo balance have no bank row; they are listed separately. Add `venmo.keywordCategories` in Settings, for example `{"rent":"Housing: Rent"}`. Use the category's exact name as it appears in Actual. If your Actual setup already has a rule that renames "VENMO" payees, applying a row replaces that payee with the person's name.
+Notes: matches need the same amount and a date within `venmo.dayWindow` days (default 5, for ACH delay). Each updated bank row gets a marker like `[venmo:12345]` in its notes so a second run never touches it twice. Payments made from your Venmo balance have no bank row; they are listed separately. Add keyword rules in the Venmo tab's Settings, for example the word "rent" with the category "Housing: Rent". Use the category's exact name as it appears in Actual. If your Actual setup already has a rule that renames "VENMO" payees, applying a row replaces that payee with the person's name.
 
 ## SnapTrade
 
@@ -93,11 +93,11 @@ Notes: matches need the same amount and a date within `venmo.dayWindow` days (de
 - Transfers between on-budget accounts are ignored. Transfers to off-budget accounts (brokerage, loan) count as money leaving cash.
 - The loan model does not include interest on loan proceeds, rate changes on a variable-rate HELOC, or taxes. Rates and fees are placeholders until you enter real quotes.
 - SimpleFIN limits how often it can be pulled, so results are cached for `simplefin.cacheHours` (default 6); use "Fetch fresh" sparingly.
-- The projection holds income and spending flat (optional yearly growth in Settings) and treats planned purchases as one-time.
+- The projection holds income and spending flat (optional yearly growth in the Loan tab's Settings) and treats planned purchases as one-time.
 
 ### Cannot reach the Actual server
 
-Use **Settings > Test connection to Actual** in the web page: it reports whether the problem is DNS, a refused port, a timeout (firewall), a wrong http/https, or an untrusted certificate. From the container shell, `curl -sI` hides errors; use `curl -v --max-time 8 http://IP:5006` instead. For an internal/self-signed certificate behind NPMplus, copy the CA into the container and add `NODE_EXTRA_CA_CERTS=/path/ca.pem` to `/etc/actual-companion.env`, or point `ACTUAL_SERVER_URL` at `http://IP:5006` directly.
+Use **Settings > Test connection to Actual** (the Settings button at the top of the Loan, Budget or Venmo tab): it reports whether the problem is DNS, a refused port, a timeout (firewall), a wrong http/https, or an untrusted certificate. From the container shell, `curl -sI` hides errors; use `curl -v --max-time 8 http://IP:5006` instead. For an internal/self-signed certificate behind NPMplus, copy the CA into the container and add `NODE_EXTRA_CA_CERTS=/path/ca.pem` to `/etc/actual-companion.env`, or point `ACTUAL_SERVER_URL` at `http://IP:5006` directly.
 
 ### Trusting the Actual certificate
 
