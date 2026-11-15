@@ -1,5 +1,6 @@
 // Thin wrapper over @actual-app/api. Everything the app needs from Actual goes through these methods,
 // so the rest of the code never touches the SDK and can be tested with a fake. Amounts leave here in dollars.
+import fs from "node:fs";
 import { diagnoseUrl } from "../lib/diagnose.js";
 const cents = (n) => (n == null ? 0 : n / 100);
 
@@ -14,6 +15,7 @@ export class ActualAdapter {
   _init() {
     if (!this._ready) {
       this._ready = (async () => {
+        if (this.dataDir) fs.mkdirSync(this.dataDir, { recursive: true }); // the Actual API scans this folder and fails if it is missing
         const m = await this.loadApi();
         this.api = m.default?.init ? m.default : m;
         await this.api.init({ dataDir: this.dataDir, serverURL: this.serverUrl, password: this.password });

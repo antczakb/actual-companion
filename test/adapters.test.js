@@ -89,3 +89,11 @@ test("Actual adapter: amounts become dollars, splits expand, transfers and payee
   assert.equal(t.find((x) => x.id === "t2").transferAcctId, "a2");
   assert.deepEqual(t.filter((x) => x.id.startsWith("s")).map((x) => [x.amount, x.categoryId, x.date]), [[-10, "c1", "2026-10-03"], [-20, "c2", "2026-10-03"]]);
 });
+
+test("Actual: creates its cache folder before the API starts", async () => {
+  const fs = await import("node:fs"), os = await import("node:os"), path = await import("node:path");
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ac-")), "nested", "actual-cache");
+  let existed = null;
+  const a = new ActualAdapter({ serverUrl: "http://x", password: "p", syncId: "s", dataDir: dir, loadApi: async () => ({ init: async () => { existed = fs.existsSync(dir); }, downloadBudget: async () => {}, sync: async () => {}, getAccounts: async () => [] }) });
+  await a.getAccounts(); assert.equal(existed, true);
+});
