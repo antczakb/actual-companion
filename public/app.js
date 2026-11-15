@@ -74,6 +74,66 @@ function lineChart(series, labels, { money = true } = {}) {
   }
   return h("div", {}, svg, h("div", { class: "legend" }, series.map((s) => h("span", {}, h("i", { style: `background:${s.color}` }), s.name))));
 }
+// Interactive history chart: tap/click/hover (or use arrow keys / Prev / Next) to select a point and see its change
+// against the point before, the point after, and the first point. points: [{date, total, parts:[{name,balance}]}]
+function historyChart(points) {
+  const W = 900, H = 280, L = 70, R = 16, T = 16, B = 28, n = points.length, vals = points.map((p) => p.total);
+  let lo = Math.min(...vals), hi = Math.max(...vals); if (lo === hi) { lo -= 1; hi += 1; } const padY = (hi - lo) * 0.08; lo -= padY; hi += padY;
+  const X = (i) => L + (n < 2 ? (W - L - R) / 2 : (i / (n - 1)) * (W - L - R)), Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const ns = "http://www.w3.org/2000/svg", el = (t, a, txt) => { const e = document.createElementNS(ns, t); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); if (txt != null) e.textContent = txt; return e; };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart interactive", role: "group", tabindex: "0", "aria-label": "Investment history. Use left and right arrow keys to move between points." });
+  for (let k = 0; k <= 4; k++) { const v = lo + ((hi - lo) * k) / 4, y = Y(v); svg.append(el("line", { x1: L, x2: W - R, y1: y, y2: y, stroke: "currentColor", "stroke-opacity": ".12" }), el("text", { x: L - 6, y: y + 4, "text-anchor": "end", "font-size": 11, fill: "currentColor", "fill-opacity": ".7" }, usd(v))); }
+  const step = Math.max(1, Math.ceil(n / 7));
+  points.forEach((p, i) => { if (i % step === 0) svg.append(el("text", { x: X(i), y: H - 8, "text-anchor": "middle", "font-size": 11, fill: "currentColor", "fill-opacity": ".7" }, p.date.slice(2))); });
+  svg.append(el("polyline", { points: points.map((p, i) => `${X(i)},${Y(p.total)}`).join(" "), fill: "none", stroke: "#1f5fbf", "stroke-width": 2 }));
+  const dots = points.map((p, i) => { const c = el("circle", { cx: X(i), cy: Y(p.total), r: n > 60 ? 2 : 3.5, fill: "#1f5fbf" }); svg.append(c); return c; });
+  const guide = el("line", { y1: T, y2: H - B, stroke: "currentColor", "stroke-opacity": ".35", "stroke-dasharray": "3 3" }), ring = el("circle", { r: 7, fill: "none", stroke: "#c55a11", "stroke-width": 2.5 });
+  const ringPrev = el("circle", { r: 5.5, fill: "none", stroke: "#888", "stroke-width": 1.5, "stroke-dasharray": "2 2" }), ringNext = el("circle", { r: 5.5, fill: "none", stroke: "#888", "stroke-width": 1.5, "stroke-dasharray": "2 2" });
+  const lblPrev = el("text", { "font-size": 11, "text-anchor": "middle", "font-weight": 600 }), lblNext = el("text", { "font-size": 11, "text-anchor": "middle", "font-weight": 600 });
+  svg.append(guide, ringPrev, ringNext, ring, lblPrev, lblNext);
+
+  const sgn = (v) => (v >= 0 ? "+" : "-") + usd(Math.abs(v)), sp = (a, b) => (b ? ((a / b) * 100).toFixed(1).replace(/^(?!-)/, "+") + "%" : "n/a");
+  const col = (v) => (v > 0 ? "up" : v < 0 ? "down" : "");
+  const detail = h("div", { class: "card hist-detail", "aria-live": "polite" }), tbody = h("tbody");
+  const prevB = h("button", { class: "alt", "aria-label": "Previous snapshot" }, "\u25C0 Prev"), nextB = h("button", { class: "alt", "aria-label": "Next snapshot" }, "Next \u25B6");
+  const stat = (label, delta, base, note) => h("div", { class: "hstat" }, h("span", { class: "mute" }, label), delta == null ? h("b", { class: "mute" }, "none") : h("b", { class: col(delta) }, sgn(delta), " ", h("small", {}, `(${sp(delta, base)})`)), note ? h("small", { class: "mute" }, note) : null);
+  const rowsEls = points.map((p, i) => {
+    const d = i ? p.total - points[i - 1].total : null, run = p.total - points[0].total;
+    const tr = h("tr", { class: "pick", tabindex: "-1" }, h("td", { "data-label": "Date" }, p.date), h("td", { class: "n", "data-label": "Total" }, usd(p.total)), h("td", { class: "n " + (d == null ? "" : col(d)), "data-label": "Change vs previous" }, d == null ? "" : `${sgn(d)} (${sp(d, points[i - 1].total)})`), h("td", { class: "n " + col(run), "data-label": "Change since first" }, i ? `${sgn(run)} (${sp(run, points[0].total)})` : ""));
+    tr.addEventListener("click", () => select(i, true)); return tr;
+  });
+  tbody.append(...rowsEls.slice().reverse());
+  let sel = n - 1;
+  function select(i, scroll) {
+    sel = Math.max(0, Math.min(n - 1, i)); const p = points[sel], pv = points[sel - 1], nx = points[sel + 1];
+    guide.setAttribute("x1", X(sel)); guide.setAttribute("x2", X(sel)); ring.setAttribute("cx", X(sel)); ring.setAttribute("cy", Y(p.total));
+    for (const [r, l, q, j] of [[ringPrev, lblPrev, pv, sel - 1], [ringNext, lblNext, nx, sel + 1]]) {
+      r.style.display = l.style.display = q ? "" : "none";
+      if (q) { r.setAttribute("cx", X(j)); r.setAttribute("cy", Y(q.total)); const d = q === pv ? p.total - q.total : q.total - p.total; l.textContent = sgn(d); l.setAttribute("x", Math.min(Math.max(X(j), L + 20), W - R - 20)); l.setAttribute("y", Y(q.total) + (q.total >= p.total ? -11 : 18)); l.setAttribute("fill", d > 0 ? "#1a7f37" : d < 0 ? "#c0362c" : "currentColor"); }
+    }
+    prevB.disabled = sel === 0; nextB.disabled = sel === n - 1;
+    const parts = (p.parts || []).slice().sort((a, b) => b.balance - a.balance), pparts = new Map(((pv && pv.parts) || []).map((x) => [x.name, x.balance]));
+    fill(detail,
+      h("div", { class: "row" }, h("b", { class: "hdate" }, p.date), h("b", { class: "hval" }, usd(p.total)), h("span", { class: "mute" }, `Snapshot ${sel + 1} of ${n}`), h("span", { style: "flex:1" }), prevB, nextB),
+      h("div", { class: "hstats" },
+        stat("vs previous snapshot", pv ? p.total - pv.total : null, pv && pv.total, pv ? `${pv.date}: ${usd(pv.total)}` : "This is the first snapshot"),
+        stat("vs next snapshot", nx ? nx.total - p.total : null, p.total, nx ? `${nx.date}: ${usd(nx.total)} (change from here)` : "This is the latest snapshot"),
+        stat("since first snapshot", sel ? p.total - points[0].total : null, points[0].total, sel ? `from ${points[0].date}: ${usd(points[0].total)}` : "Starting point")),
+      parts.length > 1 ? h("div", { class: "hparts" }, parts.map((x) => { const d = pparts.has(x.name) ? x.balance - pparts.get(x.name) : null; return h("div", {}, h("span", {}, x.name), h("b", {}, usd(x.balance)), d == null ? null : h("small", { class: col(d) }, sgn(d))); })) : null);
+    rowsEls.forEach((r, k) => r.classList.toggle("sel", k === sel));
+    if (scroll) svg.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+  const idxAt = (ev) => { const r = svg.getBoundingClientRect(), x = ((ev.clientX - r.left) / r.width) * W; let best = 0, bd = Infinity; for (let i = 0; i < n; i++) { const d = Math.abs(X(i) - x); if (d < bd) { bd = d; best = i; } } return best; };
+  let down = false;
+  svg.addEventListener("pointerdown", (ev) => { down = true; try { svg.setPointerCapture(ev.pointerId); } catch {} select(idxAt(ev)); });
+  svg.addEventListener("pointermove", (ev) => { if (down || ev.pointerType === "mouse") select(idxAt(ev)); });
+  svg.addEventListener("pointerup", () => { down = false; }); svg.addEventListener("pointercancel", () => { down = false; });
+  svg.addEventListener("keydown", (ev) => { const m = { ArrowLeft: -1, ArrowRight: 1, Home: -n, End: n }[ev.key]; if (m) { ev.preventDefault(); select(m === -n ? 0 : m === n ? n - 1 : sel + m); } });
+  prevB.addEventListener("click", () => select(sel - 1)); nextB.addEventListener("click", () => select(sel + 1));
+  select(n - 1);
+  const t = h("table", { class: "stack" }, h("thead", {}, h("tr", {}, ["Date", "Total", "Change vs previous", "Change since first"].map((c, k) => h("th", { class: k ? "n" : "" }, c)))), tbody);
+  return h("div", {}, h("div", { class: "mute" }, "Tap or hover the chart to pick a snapshot; the dashed rings are the snapshots before and after it."), svg, detail, h("h2", {}, "Snapshots over time"), h("div", { class: "tablewrap stackwrap" }, t));
+}
 function download(name, text, type) { const a = h("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name }); document.body.append(a); a.click(); a.remove(); }
 const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
@@ -377,7 +437,7 @@ function investTab() {
     fill(out,
       !r.configured ? h("div", { class: "warn" }, "SnapTrade is not configured. Set SNAPTRADE_CLIENT_ID and SNAPTRADE_CONSUMER_KEY (see README).") : null,
       h("div", { class: "kpis" }, h("div", { class: "kpi" }, h("b", {}, usd(total)), h("span", {}, "Total, latest snapshots")), h("div", { class: "kpi" }, h("b", {}, r.accounts.length), h("span", {}, "Accounts"))),
-      r.series.length ? lineChart([{ name: "Total investments", color: "#1f5fbf", values: r.series.map((x) => x.total) }], r.series.map((x) => x.date)) : h("div", { class: "mute" }, "No snapshots yet. Connect a brokerage, then refresh."),
+      r.series.length ? historyChart(r.series) : h("div", { class: "mute" }, "No snapshots yet. Connect a brokerage, then refresh."),
       h("h2", {}, "Accounts"), table([{ label: "Account", key: "name" }, { label: "Institution", key: "institution" }, { label: "As of", key: "date" }, { label: "Balance", num: 1, render: (x) => usd(x.balance, 2) }, { label: "Cash", num: 1, render: (x) => usd(x.cash, 2) }], r.accounts),
       h("h2", {}, "Holdings (all accounts)"), table([{ label: "Symbol", key: "symbol" }, { label: "Description", key: "description" }, { label: "Units", num: 1, render: (x) => x.units.toLocaleString("en-US", { maximumFractionDigits: 4 }) }, { label: "Value", num: 1, render: (x) => usd(x.value, 2) }, { label: "Accounts", render: (x) => x.accounts.join(", ") }], r.holdings));
   }

@@ -12,7 +12,8 @@ test("snapshots: same-day record replaces, latest and carried-forward series, ho
   s.record("2026-11-01", [{ accountId: "a", name: "IRA", balance: 1000, holdings: [{ symbol: "VTI", units: 4, value: 1000 }] }, { accountId: "b", name: "Brokerage", balance: 500, holdings: [{ symbol: "VTI", units: 2, value: 500 }] }]);
   s.record("2026-11-08", [{ accountId: "a", name: "IRA", balance: 1100, holdings: [{ symbol: "VTI", units: 4, value: 1100 }] }]);
   s.record("2026-11-08", [{ accountId: "a", name: "IRA", balance: 1200, holdings: [{ symbol: "VTI", units: 4, value: 1200 }] }]); // replaces
-  assert.deepEqual(s.series(), [{ date: "2026-11-01", total: 1500 }, { date: "2026-11-08", total: 1700 }]);
+  assert.deepEqual(s.series().map((x) => [x.date, x.total]), [["2026-11-01", 1500], ["2026-11-08", 1700]]);
+  assert.deepEqual(s.series()[1].parts, [{ name: "IRA", balance: 1200 }, { name: "Brokerage", balance: 500 }]);
   assert.equal(s.latest().length, 2);
   assert.deepEqual(s.holdings().map((h) => [h.symbol, h.units, h.value]), [["VTI", 6, 1700]]);
   assert.equal(new SnapshotStore(f).data.snapshots.length, 3); // persisted

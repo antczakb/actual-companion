@@ -33,7 +33,10 @@ s.projection.purchases = [{ month: ym(-5), amount: 85000, name: "Kitchen remodel
 settings.set(s);
 const sample = { errors: [], accounts: [{ org: { name: "Demo Bank", domain: "demo.example" }, id: "ACT-1", name: "Checking", currency: "USD", balance: "24000.00", "available-balance": "23900.00", "balance-date": Math.floor(Date.now() / 1000),
   transactions: [{ id: "T1", posted: Math.floor(Date.now() / 1000) - 86400, amount: "-45.00", description: "VENMO PAYMENT 99", extra: { category: "transfer" } }, { id: "T2", posted: 0, amount: "-9.99", description: "PENDING", pending: true }] }] };
-const handlers = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "inv.json")), settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
+const invStore = new SnapshotStore(path.join(dir, "inv.json"));
+{ let ira = 52000, brk = 18000; for (let k = 14; k >= 0; k--) { const d = new Date(now.getTime() - k * 14 * 864e5).toISOString().slice(0, 10); ira = ira * (1 + Math.sin(k * 1.7) * 0.02 + 0.006) + 400; brk = brk * (1 + Math.cos(k * 1.3) * 0.025 + 0.004);
+  invStore.record(d, [{ accountId: "ira", name: "Roth IRA", institution: "Demo Brokerage", balance: Math.round(ira), cash: 200, holdings: [] }, { accountId: "brk", name: "Taxable", institution: "Demo Brokerage", balance: Math.round(brk), cash: 50, holdings: [] }]); } }
+const handlers = createHandlers({ actual, snaptrade: null, store: invStore, settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
   simplefin: { accessUrl: "http://demo:demo@127.0.0.1/simplefin", fetchImpl: async () => ({ ok: true, json: async () => sample }) } });
 const port = +process.env.PORT || 3100;
 createServer({ handlers, password: null }).listen(port, "127.0.0.1", () => console.log(`Demo (made-up data) on http://127.0.0.1:${port}`));

@@ -24,8 +24,9 @@ export class SnapshotStore {
     const dates = [...new Set(this.data.snapshots.map((s) => s.date))].sort();
     const last = new Map();
     return dates.map((d) => {
-      this.data.snapshots.filter((s) => s.date === d).forEach((s) => last.set(`${s.source}:${s.accountId}`, s.balance));
-      return { date: d, total: [...last.values()].reduce((a, b) => a + b, 0) };
+      this.data.snapshots.filter((s) => s.date === d).forEach((s) => last.set(`${s.source}:${s.accountId}`, { name: s.name, balance: s.balance }));
+      const parts = [...last.values()].map((v) => ({ name: v.name, balance: v.balance }));
+      return { date: d, total: parts.reduce((a, b) => a + b.balance, 0), parts };
     });
   }
   holdings() {
