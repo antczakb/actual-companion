@@ -8,6 +8,7 @@ import { createHandlers } from "../src/app.js";
 import { createServer } from "../src/server.js";
 import { SettingsStore } from "../src/config.js";
 import { SnapshotStore } from "../src/lib/investments.js";
+import { ScenarioStore } from "../src/lib/scenarios.js";
 import { FakeActual } from "./fakes.js";
 
 const NOW = new Date("2026-11-14T12:00:00Z");
@@ -32,7 +33,7 @@ function data() {
 function make(over = {}) {
   const dir = tmp(), actual = new FakeActual(data());
   const settings = new SettingsStore(path.join(dir, "s.json"));
-  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, simplefin: { accessUrl: null }, now: () => NOW, ...over });
+  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), simplefin: { accessUrl: null }, now: () => NOW, ...over });
   return { h, actual, settings, dir };
 }
 
@@ -128,4 +129,37 @@ test("server: auth required, routes, traversal blocked, body limit", async () =>
   assert.equal((await call({ path: "/api/nope", headers: auth })).status, 404);
   assert.equal((await call({ method: "POST", path: "/api/venmo/preview", headers: { ...auth, "Content-Type": "application/json" } }, "x".repeat(500))).status, 413);
   srv.closeAllConnections?.(); srv.close();
+});
+
+test("loan: home value and mortgage can come from Actual accounts", async () => {
+  const { h, actual, settings } = make();
+  actual.d.accounts.push({ id: "hs", name: "House", offbudget: true, closed: false, balance: 750000 }, { id: "mg", name: "Mortgage", offbudget: true, closed: false, balance: -310000 });
+  const s = settings.get(); s.loan.homeValue = 1; s.loan.mortgage = 1; s.loan.homeValueAccount = "House"; s.loan.mortgageAccount = "Mortgage"; s.loan.otherLiensAccount = "Gone";
+  settings.set(s);
+  const r = await h["GET /api/loan"]({ query: {} });
+  assert.deepEqual(r.resolved.homeValue, { value: 750000, source: "House" });
+  assert.deepEqual(r.resolved.mortgage, { value: 310000, source: "Mortgage" });
+  assert.equal(r.resolved.otherLiens.source, "custom");
+  assert.ok(r.warnings.some((w) => /Gone/.test(w)));
+  assert.equal(r.summary.maxLoanByEquity, 0.8 * 750000 - 310000);
+  const accts = await h["GET /api/accounts"]({ query: {} });
+  assert.ok(accts.some((a) => a.name === "Mortgage" && a.balance === -310000));
+});
+
+test("scenarios: save, list, view, load back into settings, delete", async () => {
+  const { h, settings } = make();
+  const s = settings.get(); s.loan.homeValue = 800000; s.loan.mortgage = 300000; s.projection.purchases = [{ month: "2027-03", amount: 90000, name: "Kitchen" }]; settings.set(s);
+  await assert.rejects(h["POST /api/scenarios"]({ body: { name: " " } }), /name/i);
+  const rec = await h["POST /api/scenarios"]({ body: { name: "Kitchen only" } });
+  const list = await h["GET /api/scenarios"]({});
+  assert.equal(list.length, 1); assert.equal(list[0].plannedTotal, 90000); assert.ok(list[0].recommended);
+  const full = await h["GET /api/scenario"]({ query: { id: rec.id } });
+  assert.equal(full.result.comparison.length, 3); assert.ok(full.result.series.length > 0);
+  // change the planner, then load the saved scenario back
+  const t = settings.get(); t.projection.purchases = []; t.loan.mortgage = 1; settings.set(t);
+  await h["POST /api/scenarios/load"]({ body: { id: rec.id } });
+  assert.equal(settings.get().projection.purchases[0].amount, 90000); assert.equal(settings.get().loan.mortgage, 300000);
+  await h["POST /api/scenarios/delete"]({ body: { id: rec.id } });
+  assert.equal((await h["GET /api/scenarios"]({})).length, 0);
+  await assert.rejects(h["GET /api/scenario"]({ query: { id: "nope" } }), /not found/i);
 });

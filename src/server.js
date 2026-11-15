@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createHandlers } from "./app.js";
 import { SettingsStore } from "./config.js";
 import { SnapshotStore } from "./lib/investments.js";
+import { ScenarioStore } from "./lib/scenarios.js";
 import { ActualAdapter } from "./adapters/actual.js";
 import { SnapTradeAdapter } from "./adapters/snaptrade.js";
 
@@ -60,6 +61,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     snaptrade: new SnapTradeAdapter({ clientId: E.SNAPTRADE_CLIENT_ID, consumerKey: E.SNAPTRADE_CONSUMER_KEY, userFile: path.join(dataDir, "snaptrade-user.json") }),
     store: new SnapshotStore(path.join(dataDir, "investments.json")),
     settings: new SettingsStore(path.join(dataDir, "settings.json")),
+    scenarios: new ScenarioStore(path.join(dataDir, "scenarios.json")),
     simplefin: { accessUrl: E.SIMPLEFIN_ACCESS_URL, cachePath: path.join(dataDir, "simplefin-cache.json") },
   });
   const port = +E.PORT || 3000;

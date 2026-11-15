@@ -56,7 +56,8 @@ const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"
 const VERDICT_LABEL = { ok: "Works", "none-needed": "Not needed", caution: "Caution", equity: "Not enough home equity", infeasible: "Payments too high" };
 async function loanTab() {
   const root = $("loan"), out = h("div"), msg = h("div");
-  let S = await api("/api/settings"), selected = S.loan.product;
+  let S = await api("/api/settings"), selected = S.loan.product, accts = [], acctNote = "";
+  try { accts = await api("/api/accounts"); } catch (e) { acctNote = "Could not read accounts from Actual (" + e.message + "). Enter values by hand."; }
   const purchases = S.projection.purchases.map((p) => ({ ...p })), products = S.loan.products.map((p) => ({ ...p }));
   const nextMonth = (k) => { const d = new Date(); d.setMonth(d.getMonth() + k); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
   const inp = (type, val, on, extra = {}) => { const e = h("input", { type, class: "in", step: "any", value: val ?? "", ...extra }); e.addEventListener("input", () => on(e)); return e; };
@@ -79,8 +80,23 @@ async function loanTab() {
 
   // Step 2: your situation
   const L = S.loan, P = S.projection;
+  // A dropdown of Actual accounts or "Custom value". Picking an account uses its live balance (absolute value for debts).
+  const srcField = (custom, account, liability, guess) => {
+    let customVal = custom || 0;
+    if (!account && !custom && guess) account = (accts.find((a) => guess.test(a.name) && !(liability === false && /mortgage|loan|heloc/i.test(a.name))) || {}).name || null;
+    const sel = h("select", { class: "in" }, h("option", { value: "" }, "Custom value"), accts.map((a) => h("option", { value: a.name }, `${a.name} (${usd(a.balance)})`)));
+    if (account && !accts.some((a) => a.name === account)) sel.append(h("option", { value: account }, account + " (not found in Actual)"));
+    const num = inp("number", customVal, (e) => { customVal = +e.value || 0; }, { min: 0 });
+    const sync = () => { const a = accts.find((x) => x.name === sel.value); num.disabled = !!sel.value; num.value = a ? (liability ? Math.abs(a.balance) : Math.max(0, a.balance)) : customVal; };
+    sel.value = account || ""; sel.addEventListener("change", sync); sync();
+    return { sel, num, get account() { return sel.value || null; }, get custom() { return customVal; } };
+  };
+  const src = {
+    homeValue: srcField(L.homeValue, L.homeValueAccount, false, /house|home|property|real estate/i),
+    mortgage: srcField(L.mortgage, L.mortgageAccount, true, /mortgage|home loan/i),
+    otherLiens: srcField(L.otherLiens, L.otherLiensAccount, true, null),
+  };
   const f = {
-    homeValue: inp("number", L.homeValue, () => {}, { min: 0 }), mortgage: inp("number", L.mortgage, () => {}, { min: 0 }), otherLiens: inp("number", L.otherLiens, () => {}, { min: 0 }),
     maxLtv: inp("number", Math.round(L.maxLtv * 1000) / 10, () => {}, { min: 0, max: 100 }), cushion: inp("number", L.cushion, () => {}, { min: 0 }),
     reserveMonths: inp("number", P.reserveMonths, () => {}, { min: 0 }), horizon: inp("number", L.horizonMonths, () => {}, { min: 6, max: 120 }),
     protect: h("select", { class: "in" }, h("option", { value: "Y" }, "Yes"), h("option", { value: "N" }, "No")),
@@ -105,6 +121,46 @@ async function loanTab() {
   }
 
   const go = h("button", { class: "act" }, "Save and calculate");
+  const saveName = h("input", { type: "text", class: "in", placeholder: "Scenario name, e.g. Kitchen + car 2027", style: "min-width:280px" }), saveBtn = h("button", { class: "alt" }, "Save scenario");
+  saveBtn.addEventListener("click", async () => {
+    saveBtn.disabled = true;
+    try { await save(); await api("/api/scenarios", { body: { name: saveName.value } }); saveName.value = ""; await drawScenarios(); scenBox.scrollIntoView({ behavior: "smooth" }); }
+    catch (e) { fill(msg, h("div", { class: "err" }, e.message)); } finally { saveBtn.disabled = false; }
+  });
+  const scenBox = h("div"), scenOut = h("div"), picked = new Set();
+  const when = (iso) => new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  async function drawScenarios() {
+    const list = await api("/api/scenarios");
+    const cmp = h("button", { class: "alt" }, "Compare selected");
+    cmp.addEventListener("click", async () => {
+      if (picked.size < 2) return fill(scenOut, h("div", { class: "warn" }, "Tick at least two scenarios."));
+      const recs = await Promise.all([...picked].map((id) => api("/api/scenario?id=" + id)));
+      const rows = (r) => { const rec = r.result.comparison.find((x) => x.recommended) || {}; return {
+        "Saved": when(r.savedAt), "Planned purchases": usd(r.result.plannedTotal), "Recommended loan": r.result.recommended || "none", "Borrow": usd(rec.suggested), "Draw month": rec.drawLabel || "n/a",
+        "Highest payment": rec.name ? usd(Math.max(rec.paymentInterestOnly, rec.paymentRepayment)) + "/mo" : "", "Interest": usd(rec.totalInterest), "Fees": usd(rec.upfrontFees), "Total cost": usd(rec.totalCostOfBorrowing),
+        "Worst gap without a loan": usd(rec.worstShortfall ?? r.result.selected.worstShortfall), "Combined LTV": pct(rec.combinedLtv), "Home value used": usd(r.result.resolved.homeValue.value), "Mortgage used": usd(r.result.resolved.mortgage.value),
+        "Monthly surplus": usd(r.result.assumptions.monthlySurplus) }; };
+      const vals = recs.map(rows), keys = Object.keys(vals[0]);
+      fill(scenOut, h("h2", {}, "Comparison"), table([{ label: "", render: (x) => h("b", {}, x.k) }, ...recs.map((r, i) => ({ label: r.name, render: (x) => x.v[i] }))], keys.map((k) => ({ k, v: vals.map((v) => v[k]) }))));
+    });
+    fill(scenBox, h("h2", {}, "Saved scenarios"),
+      list.length ? [table([{ label: "", render: (x) => { const c = h("input", { type: "checkbox" }); c.checked = picked.has(x.id); c.addEventListener("change", () => (c.checked ? picked.add(x.id) : picked.delete(x.id))); return c; } },
+        { label: "Name", key: "name" }, { label: "Saved", render: (x) => when(x.savedAt) }, { label: "Planned", num: 1, render: (x) => usd(x.plannedTotal) }, { label: "Recommended", render: (x) => x.recommended || "none" },
+        { label: "Borrow", num: 1, render: (x) => usd(x.borrow) }, { label: "Total cost", num: 1, render: (x) => usd(x.totalCost) },
+        { label: "", render: (x) => h("span", { class: "row" },
+          h("button", { class: "alt", onclick: async () => { try { viewScenario(await api("/api/scenario?id=" + x.id)); } catch (e) { fill(scenOut, h("div", { class: "err" }, e.message)); } } }, "View"),
+          h("button", { class: "alt", title: "Put these inputs back in the planner", onclick: async () => { try { await api("/api/scenarios/load", { body: { id: x.id } }); root.replaceChildren(); await loanTab(); } catch (e) { fill(scenOut, h("div", { class: "err" }, e.message)); } } }, "Load"),
+          h("button", { class: "alt", onclick: async () => { if (confirm(`Delete "${x.name}"?`)) { await api("/api/scenarios/delete", { body: { id: x.id } }); picked.delete(x.id); drawScenarios(); fill(scenOut); } } }, "Delete")) }], list),
+        h("div", { class: "row", style: "margin:8px 0" }, cmp)] : h("div", { class: "mute" }, "Nothing saved yet. After calculating, name the scenario and press Save scenario."));
+  }
+  function viewScenario(r) {
+    const a = r.result.assumptions, cur = (r.inputs.projection.purchases || []).map((p) => `${p.name || "Purchase"} ${p.month} ${usd(p.amount)}`).join(" · ") || "none";
+    fill(scenOut, h("h2", {}, `${r.name} (saved ${when(r.savedAt)})`),
+      h("div", { class: "card mute" }, `Purchases: ${cur}. Cash then ${usd(a.cashToday)}, income ${usd(a.monthlyIncome)}/mo, spending ${usd(a.monthlyExpenses)}/mo. Home ${usd(r.result.resolved.homeValue.value)}, mortgage ${usd(r.result.resolved.mortgage.value)}. These are the numbers as saved; use Load to re-run with today's data.`),
+      table([{ label: "Loan", render: (x) => h("span", {}, x.recommended ? "★ " : "", x.name) }, { label: "Borrow", num: 1, render: (x) => usd(x.suggested) }, { label: "Payment: interest-only / repay", num: 1, render: (x) => usd(x.paymentInterestOnly) + " / " + usd(x.paymentRepayment) },
+        { label: "Interest", num: 1, render: (x) => usd(x.totalInterest) }, { label: "Fees", num: 1, render: (x) => usd(x.upfrontFees) }, { label: "Total cost", num: 1, render: (x) => usd(x.totalCostOfBorrowing) }, { label: "Result", render: (x) => VERDICT_LABEL[x.verdict.code] || x.verdict.code }], r.result.comparison),
+      lineChart([{ name: "Cash, no loan", color: "#888", dash: true, values: r.result.series.map((x) => x.cash) }, { name: `Cash, with ${r.result.selected.product}`, color: "#1f5fbf", values: r.result.series.map((x) => x.cashWithLoan) }, { name: "Reserve target", color: "#c55a11", dash: true, values: r.result.series.map((x) => x.reserve) }], r.result.series.map((x) => x.label)));
+  }
   const adv = { loan: inp("number", "", () => {}, { min: 0, placeholder: "blank = suggested" }), draw: inp("month", "", () => {}) };
 
   async function save() {
@@ -113,7 +169,8 @@ async function loanTab() {
     s.loan.products = products.map((p) => ({ ...p, name: (p.name || "").trim() }));
     if (!s.loan.products.some((p) => p.name === selected)) selected = s.loan.products[0].name;
     s.loan.product = selected;
-    Object.assign(s.loan, { homeValue: +f.homeValue.value || 0, mortgage: +f.mortgage.value || 0, otherLiens: +f.otherLiens.value || 0, maxLtv: (+f.maxLtv.value || 0) / 100,
+    Object.assign(s.loan, { homeValue: src.homeValue.custom, mortgage: src.mortgage.custom, otherLiens: src.otherLiens.custom,
+      homeValueAccount: src.homeValue.account, mortgageAccount: src.mortgage.account, otherLiensAccount: src.otherLiens.account, maxLtv: (+f.maxLtv.value || 0) / 100,
       cushion: +f.cushion.value || 0, horizonMonths: +f.horizon.value || 60, protectReserve: f.protect.value === "Y" });
     Object.assign(s.projection, { reserveMonths: +f.reserveMonths.value || 0, incomeOverride: numOrNull(f.income), expensesOverride: numOrNull(f.expenses), investingOverride: numOrNull(f.investing) });
     S = await api("/api/settings", { method: "PUT", body: s });
@@ -142,6 +199,7 @@ async function loanTab() {
         { label: "Result", render: (x) => VERDICT_LABEL[x.verdict.code] || x.verdict.code }, { label: "", render: (x) => (x.name === selected ? h("b", {}, "Showing below") : h("button", { class: "alt", onclick: () => { selected = x.name; calc(false); } }, "Show details")) }], r.comparison,
         { rowClass: (x) => (x.name === selected ? "sel" : "") }),
       h("div", { class: "mute" }, "★ = cheapest loan whose payments still keep your cash above the floor. Total cost = interest + fees over the whole term."),
+      h("div", { class: "card row" }, saveName, saveBtn, h("span", { class: "mute" }, "Saves your current inputs and this result so you can compare later.")),
       h("h2", {}, `Details: ${s.product}`),
       h("div", { class: "verdict " + s.verdict.code }, s.verdict.text),
       h("div", { class: "kpis" },
@@ -163,14 +221,16 @@ async function loanTab() {
     h("div", { class: "card mute" }, "Blue boxes are inputs. Work top to bottom: list what you plan to buy, check your home and cash assumptions, check the loan terms, then press Save and calculate. Your cash, income and spending are read from Actual."),
     h("h2", {}, "1. Planned large purchases"), h("div", { class: "card" }, pBox),
     h("h2", {}, "2. Your situation"),
-    h("div", { class: "card" }, h("div", { class: "row" },
-      field("Home value ($)", f.homeValue), field("Mortgage balance ($)", f.mortgage), field("Other liens ($)", f.otherLiens), field("Max combined LTV (%)", f.maxLtv, "usually 80-85"),
+    h("div", { class: "card" }, acctNote ? h("div", { class: "warn" }, acctNote) : h("div", { class: "mute", style: "margin-bottom:8px" }, "Pick an Actual account to use its current balance (a mortgage shows as a positive amount owed), or choose Custom value and type a number."), h("div", { class: "row" },
+      field("Home value: Actual account", src.homeValue.sel), field("Home value ($)", src.homeValue.num), field("Mortgage: Actual account", src.mortgage.sel), field("Mortgage balance ($)", src.mortgage.num),
+      field("Other liens: Actual account", src.otherLiens.sel), field("Other liens ($)", src.otherLiens.num), field("Max combined LTV (%)", f.maxLtv, "usually 80-85"),
       field("Keep a reserve?", f.protect, "reserve = months of spending"), field("Reserve (months)", f.reserveMonths), field("Extra cushion ($)", f.cushion), field("Look ahead (months)", f.horizon)),
       h("details", { style: "margin-top:10px" }, h("summary", { class: "mute" }, "Override what Actual says (monthly $)"), h("div", { class: "row", style: "margin-top:8px" }, field("Income", f.income), field("Spending", f.expenses), field("To investments/debt", f.investing)))),
     h("h2", {}, "3. Loans to compare"), h("div", { class: "card" }, prBox, h("div", { class: "mute", style: "margin-top:6px" }, "Rate and fee are percentages. Interest-only years: payments are interest only before the repayment term starts (a HELOC draw period).")),
     h("div", { class: "row", style: "margin:12px 0" }, go,
       h("details", {}, h("summary", { class: "mute" }, "Try a specific amount or draw month"), h("div", { class: "row", style: "margin-top:8px" }, field("Loan amount ($)", adv.loan), field("Draw month", adv.draw)))),
-    msg, out);
+    msg, out, scenBox, scenOut);
+  drawScenarios().catch((e) => fill(scenBox, h("div", { class: "err" }, e.message)));
   if (purchases.length) calc(false);
 }
 

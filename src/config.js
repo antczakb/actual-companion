@@ -5,6 +5,7 @@ export const DEFAULT_SETTINGS = {
   loan: {
     product: "HELOC", protectReserve: true, cushion: 2000, roundTo: 1000, maxLtv: 0.8,
     homeValue: 0, mortgage: 0, otherLiens: 0, horizonMonths: 60,
+    homeValueAccount: null, mortgageAccount: null, otherLiensAccount: null, // an Actual account name, or null to use the custom value above
     products: [
       { name: "HELOC", rate: 0.08, ioYears: 10, termYears: 20, feePct: 0, fixedFee: 0, secured: true },
       { name: "Home equity loan", rate: 0.0775, ioYears: 0, termYears: 15, feePct: 0.02, fixedFee: 0, secured: true },
@@ -41,6 +42,7 @@ export function validateSettings(s) {
   if (L.products && !L.products.find((p) => p.name === L.product)) errs.push("loan.product must match a product name");
   num(L.maxLtv, "loan.maxLtv", 0, 1); num(L.horizonMonths, "loan.horizonMonths", 6, 120); num(L.cushion, "loan.cushion", 0); num(L.roundTo, "loan.roundTo", 0);
   for (const k of ["homeValue", "mortgage", "otherLiens"]) num(L[k], `loan.${k}`, 0);
+  for (const k of ["homeValueAccount", "mortgageAccount", "otherLiensAccount"]) if (L[k] != null && typeof L[k] !== "string") errs.push(`loan.${k} must be an account name or null`);
   (s.projection?.purchases || []).forEach((p, i) => { if (!/^\d{4}-\d{2}$/.test(p.month || "")) errs.push(`projection.purchases[${i}].month must look like 2027-06`); num(+p.amount, `projection.purchases[${i}].amount`, 0); });
   return errs;
 }

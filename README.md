@@ -107,3 +107,8 @@ If Actual itself serves HTTPS with its own certificate (a plain `http://` reques
    `openssl s_client -connect 192.168.0.238:5006 </dev/null 2>/dev/null | openssl x509 > /etc/actual-companion-ca.pem`
    then add `NODE_EXTRA_CA_CERTS=/etc/actual-companion-ca.pem` to `/etc/actual-companion.env` and `systemctl restart actual-companion`. The certificate must list the host name or IP you use in `ACTUAL_SERVER_URL`.
 2. **Skip verification (LAN only).** Add `ACTUAL_INSECURE_TLS=1` to `/etc/actual-companion.env`. This turns off certificate checking for every outbound HTTPS call the app makes, including SimpleFIN and SnapTrade, so use it only until you have done option 1.
+
+### Loan planner: Actual accounts and saved scenarios
+
+- In step 2, home value, mortgage and other liens can each come from an Actual account (its current balance; debts show as a positive amount owed) or a custom value. Accounts named like "House" or "Mortgage" are pre-selected the first time.
+- **Save scenario** stores your inputs and the result under a name (`scenarios.json` in the data folder). **View** shows the result as saved, **Load** puts the inputs back in the planner, and ticking two or more then **Compare selected** shows them side by side.
