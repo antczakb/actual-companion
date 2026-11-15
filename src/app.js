@@ -4,6 +4,7 @@ import { sizeLoan, compareProducts } from "./lib/loan.js";
 import { suggestBudget } from "./lib/suggest.js";
 import { parseVenmoCSV, matchVenmo } from "./lib/venmo.js";
 import { getSimpleFIN, toTables } from "./lib/simplefin.js";
+import { diagnoseUrl } from "./lib/diagnose.js";
 import { addMonths, currentMonth, lastDayOf } from "./lib/dates.js";
 
 const httpErr = (status, message) => Object.assign(new Error(message), { status });
@@ -24,6 +25,8 @@ export function createHandlers(d) {
     "GET /api/status": async () => ({
       actual: actual.configured(), simplefin: !!simplefin.accessUrl, snaptrade: !!snaptrade?.configured(), snaptradeConnected: !!snaptrade?.connected?.(),
     }),
+
+    "GET /api/actual/check": async () => (actual.serverUrl ? diagnoseUrl(actual.serverUrl) : { ok: null, message: "Not available." }),
 
     "GET /api/settings": async () => settings.get(),
     "PUT /api/settings": async ({ body }) => settings.set(body),

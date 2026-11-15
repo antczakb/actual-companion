@@ -1,3 +1,4 @@
+if (process.env.ACTUAL_INSECURE_TLS === "1") { process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; console.warn("WARNING: ACTUAL_INSECURE_TLS=1 - TLS certificates are NOT verified (affects every outbound HTTPS call from this app). Use only on a trusted LAN."); }
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";

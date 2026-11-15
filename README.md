@@ -94,3 +94,16 @@ Notes: matches need the same amount and a date within `venmo.dayWindow` days (de
 - The loan model does not include interest on loan proceeds, rate changes on a variable-rate HELOC, or taxes. Rates and fees are placeholders until you enter real quotes.
 - SimpleFIN limits how often it can be pulled, so results are cached for `simplefin.cacheHours` (default 6); use "Fetch fresh" sparingly.
 - The projection holds income and spending flat (optional yearly growth in Settings) and treats planned purchases as one-time.
+
+### Cannot reach the Actual server
+
+Use **Settings > Test connection to Actual** in the web page: it reports whether the problem is DNS, a refused port, a timeout (firewall), a wrong http/https, or an untrusted certificate. From the container shell, `curl -sI` hides errors; use `curl -v --max-time 8 http://IP:5006` instead. For an internal/self-signed certificate behind NPMplus, copy the CA into the container and add `NODE_EXTRA_CA_CERTS=/path/ca.pem` to `/etc/actual-companion.env`, or point `ACTUAL_SERVER_URL` at `http://IP:5006` directly.
+
+### Trusting the Actual certificate
+
+If Actual itself serves HTTPS with its own certificate (a plain `http://` request gets "Empty reply from server"), use `https://IP:5006` and either:
+
+1. **Trust it (preferred).** In the container:
+   `openssl s_client -connect 192.168.0.238:5006 </dev/null 2>/dev/null | openssl x509 > /etc/actual-companion-ca.pem`
+   then add `NODE_EXTRA_CA_CERTS=/etc/actual-companion-ca.pem` to `/etc/actual-companion.env` and `systemctl restart actual-companion`. The certificate must list the host name or IP you use in `ACTUAL_SERVER_URL`.
+2. **Skip verification (LAN only).** Add `ACTUAL_INSECURE_TLS=1` to `/etc/actual-companion.env`. This turns off certificate checking for every outbound HTTPS call the app makes, including SimpleFIN and SnapTrade, so use it only until you have done option 1.

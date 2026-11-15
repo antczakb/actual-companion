@@ -126,8 +126,16 @@ function investTab() {
   refresh.addEventListener("click", async () => { refresh.disabled = true; try { const r = await api("/api/investments/refresh", { body: {} }); await load(); out.prepend(h("div", { class: "mute" }, `Recorded ${r.recorded} account(s) for ${r.date}.`)); } catch (e) { out.prepend(h("div", { class: "err" }, e.message)); } finally { refresh.disabled = false; } });
   connect.addEventListener("click", async () => { try { const r = await api("/api/snaptrade/connect"); window.open(r.url, "_blank", "noopener"); } catch (e) { out.prepend(h("div", { class: "err" }, e.message)); } });
   const shapeBtn = h("button", { class: "alt" }, "Show response shape");
-  shapeBtn.addEventListener("click", async () => { try { out.prepend(h("pre", { class: "card", style: "overflow:auto;max-height:300px" }, JSON.stringify(await api("/api/snaptrade/shape"), null, 1))); } catch (e) { out.prepend(h("div", { class: "err" }, e.message)); } });
-  root.append(h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, shapeBtn, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept."))), out);
+  const shapeBox = h("div");
+  const showShape = (...kids) => { shapeBox.replaceChildren(...kids); };
+  shapeBtn.addEventListener("click", async () => {
+    shapeBtn.disabled = true; showShape(h("div", { class: "mute" }, "Working..."));
+    try {
+      const r = await api("/api/snaptrade/shape");
+      showShape(h("div", { class: "card" }, h("div", { class: "row" }, h("b", {}, "SnapTrade response shape (names and types only)"), h("button", { class: "alt", onclick: () => showShape() }, "Close")), h("pre", { style: "overflow:auto;max-height:300px;margin:8px 0 0" }, JSON.stringify(r, null, 1))));
+    } catch (e) { showShape(h("div", { class: "err" }, e.message), h("button", { class: "alt", onclick: () => showShape() }, "Close")); } finally { shapeBtn.disabled = false; }
+  });
+  root.append(h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, shapeBtn, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept."))), shapeBox, out);
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
 
@@ -193,7 +201,9 @@ function settingsTab() {
   const root = $("settings"), ta = h("textarea", { class: "json", spellcheck: "false" }), msg = h("div"), save = h("button", { class: "act" }, "Save settings");
   api("/api/settings").then((s) => (ta.value = JSON.stringify(s, null, 2)));
   save.addEventListener("click", async () => { try { ta.value = JSON.stringify(await api("/api/settings", { method: "PUT", body: JSON.parse(ta.value) }), null, 2); msg.replaceChildren(h("div", {}, "Saved.")); } catch (e) { msg.replaceChildren(h("div", { class: "err" }, e.message)); } });
-  root.append(h("div", { class: "card mute" }, "Loan products, home value, planned purchases ({\"month\":\"2027-06\",\"amount\":60000,\"name\":\"Kitchen\"}), reserve and tolerance settings. Rates are decimals (0.08 = 8%)."), ta, h("div", { class: "row", style: "margin:10px 0" }, save), msg);
+  const chk = h("button", { class: "alt" }, "Test connection to Actual"), chkOut = h("span", { class: "mute" });
+  chk.addEventListener("click", async () => { chk.disabled = true; chkOut.textContent = "Testing..."; try { const r = await api("/api/actual/check"); chkOut.textContent = r.message; chkOut.className = r.ok ? "" : "err"; } catch (e) { chkOut.textContent = e.message; chkOut.className = "err"; } finally { chk.disabled = false; } });
+  root.append(h("div", { class: "card row" }, chk, chkOut), h("div", { class: "card mute" }, "Loan products, home value, planned purchases ({\"month\":\"2027-06\",\"amount\":60000,\"name\":\"Kitchen\"}), reserve and tolerance settings. Rates are decimals (0.08 = 8%)."), ta, h("div", { class: "row", style: "margin:10px 0" }, save), msg);
 }
 
 // ---------- shell ----------

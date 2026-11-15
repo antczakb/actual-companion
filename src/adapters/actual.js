@@ -1,10 +1,11 @@
 // Thin wrapper over @actual-app/api. Everything the app needs from Actual goes through these methods,
 // so the rest of the code never touches the SDK and can be tested with a fake. Amounts leave here in dollars.
+import { diagnoseUrl } from "../lib/diagnose.js";
 const cents = (n) => (n == null ? 0 : n / 100);
 
 export class ActualAdapter {
-  constructor({ serverUrl, password, syncId, budgetPassword, dataDir, loadApi }) {
-    Object.assign(this, { serverUrl, password, syncId, budgetPassword, dataDir });
+  constructor({ serverUrl, password, syncId, budgetPassword, dataDir, loadApi, diagnose = diagnoseUrl }) {
+    serverUrl = serverUrl && serverUrl.replace(/\/+$/, ""); Object.assign(this, { serverUrl, password, syncId, budgetPassword, dataDir }); this._diagnose = diagnose;
     this.loadApi = loadApi || (() => import("@actual-app/api"));
     this._ready = null; this._chain = Promise.resolve(); this._lastSync = 0;
   }
@@ -17,9 +18,12 @@ export class ActualAdapter {
         this.api = m.default?.init ? m.default : m;
         await this.api.init({ dataDir: this.dataDir, serverURL: this.serverUrl, password: this.password });
         await this.api.downloadBudget(this.syncId, this.budgetPassword ? { password: this.budgetPassword } : undefined);
-      })().catch((e) => {
+      })().catch(async (e) => {
         this._ready = null;
-        if (/network-failure/i.test(e?.message || "")) throw new Error(`Could not reach the Actual server at ${this.serverUrl}. From inside this container, run: curl -sI ${this.serverUrl}  - and check the address, port and http/https.`);
+        if (/network-failure/i.test(e?.message || "")) {
+          const d = await this._diagnose(this.serverUrl);
+          throw new Error(`Could not reach the Actual server. ${d.message}${d.ok ? " The server answers, so also check the address is the Actual server itself, not a proxy page." : ""}`);
+        }
         throw e;
       });
     }

@@ -66,11 +66,11 @@ test("SnapTrade errors carry status and body text", async () => {
 });
 
 test("Actual: a network failure is explained in terms of the URL and a curl check", async () => {
-  const a = new ActualAdapter({ serverUrl: "http://10.0.0.5:5006", password: "p", syncId: "s", dataDir: "/tmp/x", loadApi: async () => ({ init: async () => { throw new Error("Authentication failed: network-failure"); } }) });
-  await assert.rejects(a.getAccounts(), (e) => /Could not reach the Actual server at http:\/\/10\.0\.0\.5:5006/.test(e.message) && /curl -sI/.test(e.message));
+  const a = new ActualAdapter({ serverUrl: "http://10.0.0.5:5006", password: "p", syncId: "s", dataDir: "/tmp/x", diagnose: async (u) => ({ ok: false, message: `refused ${u}` }), loadApi: async () => ({ init: async () => { throw new Error("Authentication failed: network-failure"); } }) });
+  await assert.rejects(a.getAccounts(), (e) => /Could not reach the Actual server\. refused http:\/\/10\.0\.0\.5:5006/.test(e.message));
   // a later call tries again instead of being stuck on the first failure
   let n = 0;
-  const b = new ActualAdapter({ serverUrl: "u", password: "p", syncId: "s", dataDir: "/tmp/x", loadApi: async () => ({ init: async () => { if (n++ === 0) throw new Error("network-failure"); }, downloadBudget: async () => {}, sync: async () => {}, getAccounts: async () => [], getAccountBalance: async () => 0 }) });
+  const b = new ActualAdapter({ serverUrl: "u", diagnose: async () => ({ ok: false, message: "x" }), password: "p", syncId: "s", dataDir: "/tmp/x", loadApi: async () => ({ init: async () => { if (n++ === 0) throw new Error("network-failure"); }, downloadBudget: async () => {}, sync: async () => {}, getAccounts: async () => [], getAccountBalance: async () => 0 }) });
   await assert.rejects(b.getAccounts()); assert.deepEqual(await b.getAccounts(), []);
 });
 
