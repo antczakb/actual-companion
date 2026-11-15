@@ -53,41 +53,125 @@ function download(name, text, type) { const a = h("a", { href: URL.createObjectU
 const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
 // ---------- Loan ----------
+const VERDICT_LABEL = { ok: "Works", "none-needed": "Not needed", caution: "Caution", equity: "Not enough home equity", infeasible: "Payments too high" };
 async function loanTab() {
-  const root = $("loan"), out = h("div"), prods = (await api("/api/settings")).loan.products.map((p) => p.name);
-  const f = { product: h("select", {}, prods.map((p) => h("option", {}, p))), loan: h("input", { type: "number", placeholder: "blank = suggested" }), draw: h("input", { type: "month" }),
-    protect: h("select", {}, h("option", { value: "Y" }, "Yes"), h("option", { value: "N" }, "No")), cushion: h("input", { type: "number", placeholder: "from Settings" }) };
-  const go = h("button", { class: "act" }, "Size the loan");
-  async function run() {
+  const root = $("loan"), out = h("div"), msg = h("div");
+  let S = await api("/api/settings"), selected = S.loan.product;
+  const purchases = S.projection.purchases.map((p) => ({ ...p })), products = S.loan.products.map((p) => ({ ...p }));
+  const nextMonth = (k) => { const d = new Date(); d.setMonth(d.getMonth() + k); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
+  const inp = (type, val, on, extra = {}) => { const e = h("input", { type, class: "in", step: "any", value: val ?? "", ...extra }); e.addEventListener("input", () => on(e)); return e; };
+  const numOrNull = (e) => (e.value === "" ? null : Number(e.value));
+
+  // Step 1: planned purchases
+  const pBox = h("div");
+  function drawPurchases() {
+    const total = purchases.reduce((t, p) => t + (+p.amount || 0), 0);
+    fill(pBox,
+      purchases.length ? h("div", { class: "tablewrap" }, h("table", {}, h("thead", {}, h("tr", {}, ["What", "Month", "Amount ($)", ""].map((x) => h("th", {}, x)))),
+        h("tbody", {}, purchases.map((p, i) => h("tr", {},
+          h("td", {}, inp("text", p.name, (e) => (p.name = e.value), { placeholder: "e.g. Kitchen remodel" })),
+          h("td", {}, inp("month", p.month, (e) => (p.month = e.value))),
+          h("td", {}, inp("number", p.amount, (e) => { p.amount = e.value === "" ? 0 : +e.value; }, { min: 0 })),
+          h("td", {}, h("button", { class: "alt", onclick: () => { purchases.splice(i, 1); drawPurchases(); } }, "Remove"))))))) :
+        h("div", { class: "mute" }, "None yet. Add the large purchases you expect to pay for in cash."),
+      h("div", { class: "row", style: "margin-top:8px" }, h("button", { class: "alt", onclick: () => { purchases.push({ name: "", month: nextMonth(3), amount: 0 }); drawPurchases(); } }, "+ Add purchase"), h("span", { class: "mute" }, purchases.length ? `Total planned: ${usd(total)}` : "")));
+  }
+
+  // Step 2: your situation
+  const L = S.loan, P = S.projection;
+  const f = {
+    homeValue: inp("number", L.homeValue, () => {}, { min: 0 }), mortgage: inp("number", L.mortgage, () => {}, { min: 0 }), otherLiens: inp("number", L.otherLiens, () => {}, { min: 0 }),
+    maxLtv: inp("number", Math.round(L.maxLtv * 1000) / 10, () => {}, { min: 0, max: 100 }), cushion: inp("number", L.cushion, () => {}, { min: 0 }),
+    reserveMonths: inp("number", P.reserveMonths, () => {}, { min: 0 }), horizon: inp("number", L.horizonMonths, () => {}, { min: 6, max: 120 }),
+    protect: h("select", { class: "in" }, h("option", { value: "Y" }, "Yes"), h("option", { value: "N" }, "No")),
+    income: inp("number", P.incomeOverride, () => {}, { placeholder: "from Actual" }), expenses: inp("number", P.expensesOverride, () => {}, { placeholder: "from Actual" }), investing: inp("number", P.investingOverride, () => {}, { placeholder: "from Actual" }),
+  };
+  f.protect.value = L.protectReserve ? "Y" : "N";
+
+  // Step 3: loan products
+  const prBox = h("div");
+  function drawProducts() {
+    fill(prBox, h("div", { class: "tablewrap" }, h("table", {}, h("thead", {}, h("tr", {}, ["Loan", "Rate %", "Interest-only yrs", "Repay term yrs", "Fee %", "Fixed fee $", "Secured by home", ""].map((x) => h("th", {}, x)))),
+      h("tbody", {}, products.map((p, i) => h("tr", {},
+        h("td", {}, inp("text", p.name, (e) => (p.name = e.value))),
+        h("td", {}, inp("number", Math.round(p.rate * 1e6) / 1e4, (e) => (p.rate = +e.value / 100), { min: 0 })),
+        h("td", {}, inp("number", p.ioYears, (e) => (p.ioYears = +e.value), { min: 0 })),
+        h("td", {}, inp("number", p.termYears, (e) => (p.termYears = +e.value), { min: 0 })),
+        h("td", {}, inp("number", Math.round(p.feePct * 1e6) / 1e4, (e) => (p.feePct = +e.value / 100), { min: 0 })),
+        h("td", {}, inp("number", p.fixedFee, (e) => (p.fixedFee = +e.value), { min: 0 })),
+        h("td", {}, (() => { const c = h("input", { type: "checkbox" }); c.checked = !!p.secured; c.addEventListener("change", () => (p.secured = c.checked)); return c; })()),
+        h("td", {}, products.length > 1 ? h("button", { class: "alt", onclick: () => { products.splice(i, 1); drawProducts(); } }, "Remove") : null)))))),
+      h("div", { style: "margin-top:8px" }, h("button", { class: "alt", onclick: () => { products.push({ name: "New loan", rate: 0.08, ioYears: 0, termYears: 10, feePct: 0, fixedFee: 0, secured: false }); drawProducts(); } }, "+ Add loan")));
+  }
+
+  const go = h("button", { class: "act" }, "Save and calculate");
+  const adv = { loan: inp("number", "", () => {}, { min: 0, placeholder: "blank = suggested" }), draw: inp("month", "", () => {}) };
+
+  async function save() {
+    const s = structuredClone(S);
+    s.projection.purchases = purchases.filter((p) => p.month || +p.amount).map((p) => ({ name: p.name || "", month: p.month, amount: +p.amount || 0 }));
+    s.loan.products = products.map((p) => ({ ...p, name: (p.name || "").trim() }));
+    if (!s.loan.products.some((p) => p.name === selected)) selected = s.loan.products[0].name;
+    s.loan.product = selected;
+    Object.assign(s.loan, { homeValue: +f.homeValue.value || 0, mortgage: +f.mortgage.value || 0, otherLiens: +f.otherLiens.value || 0, maxLtv: (+f.maxLtv.value || 0) / 100,
+      cushion: +f.cushion.value || 0, horizonMonths: +f.horizon.value || 60, protectReserve: f.protect.value === "Y" });
+    Object.assign(s.projection, { reserveMonths: +f.reserveMonths.value || 0, incomeOverride: numOrNull(f.income), expensesOverride: numOrNull(f.expenses), investingOverride: numOrNull(f.investing) });
+    S = await api("/api/settings", { method: "PUT", body: s });
+  }
+  async function calc(doSave = true) {
+    fill(msg);
     await busy(go, out, async () => {
-      const q = new URLSearchParams({ product: f.product.value, protect: f.protect.value });
-      if (f.loan.value) q.set("loan", f.loan.value); if (f.draw.value) q.set("draw", f.draw.value); if (f.cushion.value) q.set("cushion", f.cushion.value);
-      const r = await api("/api/loan?" + q), s = r.summary, a = r.assumptions;
-      const kp = (v, l) => h("div", { class: "kpi" }, h("b", {}, v), h("span", {}, l));
-      fill(out,
-        r.warnings.map((w) => h("div", { class: "warn" }, w)),
-        h("div", { class: "verdict " + s.verdict.code }, s.verdict.text),
-        h("div", { class: "kpis" },
-          kp(usd(s.suggested), "Suggested loan (rounded up)"), kp(usd(s.minLoan), "Minimum that keeps the floor"), kp(s.maxLoanByCashFlow == null ? "No limit" : usd(s.maxLoanByCashFlow), "Max your cash flow can repay"),
-          kp(usd(s.maxLoanByEquity), "Max by home equity"), kp(s.drawLabel || "n/a", "Draw month"), kp(s.firstBelowLabel || "None", "First month below floor"),
-          kp(usd(s.worstShortfall), "Worst gap without a loan"), kp(usd(s.paymentInterestOnly) + " / " + usd(s.paymentRepayment), "Payment: interest-only / repayment"),
-          kp(pct(s.paymentPctOfSurplus), "Highest payment vs. monthly surplus"), kp(pct(s.combinedLtv), "Combined LTV"), kp(usd(s.totalInterest), "Total interest"), kp(usd(s.upfrontFees), "Upfront fees")),
-        h("div", { class: "card mute" }, `Starting cash ${usd(a.cashToday)} (${a.cashAccounts.join(", ") || "no accounts"}) · income ${usd(a.monthlyIncome)}/mo · spending ${usd(a.monthlyExpenses)}/mo · to investments/debt ${usd(a.monthlyInvesting)}/mo · surplus ${usd(a.monthlySurplus)}/mo · based on ${a.monthsOfHistory} month(s) of history`),
-        lineChart([{ name: "Cash, no loan", color: "#888", dash: true, values: r.rows.map((x) => x.cash) }, { name: "Cash, with loan", color: "#1f5fbf", values: r.rows.map((x) => x.cashWithLoan) }, { name: "Reserve target", color: "#c55a11", dash: true, values: r.rows.map((x) => x.reserve) }], r.rows.map((x) => x.label)),
-        h("h2", {}, "Product comparison (each re-sized for its own terms)"),
-        table([{ label: "Product", key: "name" }, { label: "Needed", num: 1, render: (x) => usd(x.suggested) }, { label: "Pmt IO", num: 1, render: (x) => usd(x.paymentInterestOnly) }, { label: "Pmt repay", num: 1, render: (x) => usd(x.paymentRepayment) },
-          { label: "Interest", num: 1, render: (x) => usd(x.totalInterest) }, { label: "Fees", num: 1, render: (x) => usd(x.upfrontFees) }, { label: "Total cost", num: 1, render: (x) => usd(x.totalCostOfBorrowing) }, { label: "Verdict", render: (x) => x.verdictText }], r.comparison),
-        h("h2", {}, "Month by month"),
-        table([{ label: "Month", key: "label" }, { label: "Cash, no loan", num: 1, render: (x) => usd(x.cash) }, { label: "Purchases", num: 1, render: (x) => usd(x.purchases) }, { label: "Reserve", num: 1, render: (x) => usd(x.reserve) },
-          { label: "Cash, with loan", num: 1, render: (x) => usd(x.cashWithLoan) }, { label: "Loan payment", num: 1, render: (x) => usd(x.loanPayment) }, { label: "No loan", key: "statusNoLoan" }, { label: "With loan", key: "statusWithLoan" }], r.rows,
-          { rowClass: (x) => (x.statusWithLoan === "SHORTFALL" ? "bad" : "") }));
+      if (doSave) await save();
+      const q = new URLSearchParams({ product: selected });
+      if (adv.loan.value) q.set("loan", adv.loan.value); if (adv.draw.value) q.set("draw", adv.draw.value);
+      render(await api("/api/loan?" + q));
     });
   }
-  go.addEventListener("click", run);
-  root.append(h("div", { class: "card" }, h("div", { class: "row" },
-    h("label", {}, "Product", f.product), h("label", {}, "Loan override ($)", f.loan), h("label", {}, "Draw month override", f.draw), h("label", {}, "Protect reserve?", f.protect), h("label", {}, "Cushion ($)", f.cushion), go),
-    h("div", { class: "mute", style: "margin-top:8px" }, "Starting cash, income and spending come from Actual. Home value, mortgage, loan products and planned purchases are in Settings.")), out);
-  run();
+  function render(r) {
+    const s = r.summary, a = r.assumptions, kp = (v, l) => h("div", { class: "kpi" }, h("b", {}, v), h("span", {}, l));
+    const rec = r.comparison.find((x) => x.recommended);
+    fill(out,
+      r.warnings.map((w) => h("div", { class: "warn" }, w)),
+      h("h2", {}, "4. Result"),
+      h("div", { class: "card mute" }, `Starting cash ${usd(a.cashToday)} (${a.cashAccounts.join(", ") || "no accounts"}) · income ${usd(a.monthlyIncome)}/mo · spending ${usd(a.monthlyExpenses)}/mo · to investments/debt ${usd(a.monthlyInvesting)}/mo · surplus ${usd(a.monthlySurplus)}/mo · based on ${a.monthsOfHistory} month(s) of history`),
+      s.verdict.code === "none-needed" ? h("div", { class: "verdict none-needed" }, s.verdict.text) :
+        h("div", { class: "verdict " + (rec ? "ok" : "caution") }, rec ? `Lowest-cost loan that works: ${rec.name}, borrow about ${usd(rec.suggested)} (total cost ${usd(rec.totalCostOfBorrowing)}).` : "None of these loans works as set up. See the Result column, then change a purchase, a loan, or your cushion."),
+      h("h2", {}, "Which loan? Each one is sized for its own terms"),
+      table([{ label: "Loan", render: (x) => h("span", {}, x.recommended ? "★ " : "", x.name) }, { label: "Borrow", num: 1, render: (x) => usd(x.suggested) }, { label: "Payment: interest-only / repay", num: 1, render: (x) => usd(x.paymentInterestOnly) + " / " + usd(x.paymentRepayment) },
+        { label: "Interest", num: 1, render: (x) => usd(x.totalInterest) }, { label: "Fees", num: 1, render: (x) => usd(x.upfrontFees) }, { label: "Total cost", num: 1, render: (x) => usd(x.totalCostOfBorrowing) },
+        { label: "Result", render: (x) => VERDICT_LABEL[x.verdict.code] || x.verdict.code }, { label: "", render: (x) => (x.name === selected ? h("b", {}, "Showing below") : h("button", { class: "alt", onclick: () => { selected = x.name; calc(false); } }, "Show details")) }], r.comparison,
+        { rowClass: (x) => (x.name === selected ? "sel" : "") }),
+      h("div", { class: "mute" }, "★ = cheapest loan whose payments still keep your cash above the floor. Total cost = interest + fees over the whole term."),
+      h("h2", {}, `Details: ${s.product}`),
+      h("div", { class: "verdict " + s.verdict.code }, s.verdict.text),
+      h("div", { class: "kpis" },
+        kp(usd(s.suggested), "Suggested loan (rounded up)"), kp(usd(s.minLoan), "Minimum that keeps the floor"), kp(s.maxLoanByCashFlow == null ? "No limit" : usd(s.maxLoanByCashFlow), "Max your cash flow can repay"),
+        kp(usd(s.maxLoanByEquity), "Max by home equity"), kp(s.drawLabel || "n/a", "Draw month"), kp(s.firstBelowLabel || "None", "First month below floor"),
+        kp(usd(s.worstShortfall), "Worst gap without a loan"), kp(usd(s.paymentInterestOnly) + " / " + usd(s.paymentRepayment), "Payment: interest-only / repayment"),
+        kp(pct(s.paymentPctOfSurplus), "Highest payment vs. monthly surplus"), kp(pct(s.combinedLtv), "Combined LTV")),
+      lineChart([{ name: "Cash, no loan", color: "#888", dash: true, values: r.rows.map((x) => x.cash) }, { name: "Cash, with loan", color: "#1f5fbf", values: r.rows.map((x) => x.cashWithLoan) }, { name: "Reserve target", color: "#c55a11", dash: true, values: r.rows.map((x) => x.reserve) }], r.rows.map((x) => x.label)),
+      h("h2", {}, "Month by month"),
+      table([{ label: "Month", key: "label" }, { label: "Cash, no loan", num: 1, render: (x) => usd(x.cash) }, { label: "Purchases", num: 1, render: (x) => usd(x.purchases) }, { label: "Reserve", num: 1, render: (x) => usd(x.reserve) },
+        { label: "Cash, with loan", num: 1, render: (x) => usd(x.cashWithLoan) }, { label: "Loan payment", num: 1, render: (x) => usd(x.loanPayment) }, { label: "No loan", key: "statusNoLoan" }, { label: "With loan", key: "statusWithLoan" }], r.rows,
+        { rowClass: (x) => (x.statusWithLoan === "SHORTFALL" ? "bad" : "") }));
+  }
+
+  go.addEventListener("click", () => calc(true));
+  const field = (label, el, hint) => h("label", {}, label, el, hint ? h("small", { class: "mute" }, hint) : null);
+  drawPurchases(); drawProducts();
+  root.append(
+    h("div", { class: "card mute" }, "Blue boxes are inputs. Work top to bottom: list what you plan to buy, check your home and cash assumptions, check the loan terms, then press Save and calculate. Your cash, income and spending are read from Actual."),
+    h("h2", {}, "1. Planned large purchases"), h("div", { class: "card" }, pBox),
+    h("h2", {}, "2. Your situation"),
+    h("div", { class: "card" }, h("div", { class: "row" },
+      field("Home value ($)", f.homeValue), field("Mortgage balance ($)", f.mortgage), field("Other liens ($)", f.otherLiens), field("Max combined LTV (%)", f.maxLtv, "usually 80-85"),
+      field("Keep a reserve?", f.protect, "reserve = months of spending"), field("Reserve (months)", f.reserveMonths), field("Extra cushion ($)", f.cushion), field("Look ahead (months)", f.horizon)),
+      h("details", { style: "margin-top:10px" }, h("summary", { class: "mute" }, "Override what Actual says (monthly $)"), h("div", { class: "row", style: "margin-top:8px" }, field("Income", f.income), field("Spending", f.expenses), field("To investments/debt", f.investing)))),
+    h("h2", {}, "3. Loans to compare"), h("div", { class: "card" }, prBox, h("div", { class: "mute", style: "margin-top:6px" }, "Rate and fee are percentages. Interest-only years: payments are interest only before the repayment term starts (a HELOC draw period).")),
+    h("div", { class: "row", style: "margin:12px 0" }, go,
+      h("details", {}, h("summary", { class: "mute" }, "Try a specific amount or draw month"), h("div", { class: "row", style: "margin-top:8px" }, field("Loan amount ($)", adv.loan), field("Draw month", adv.draw)))),
+    msg, out);
+  if (purchases.length) calc(false);
 }
 
 // ---------- Budget ----------

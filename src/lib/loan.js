@@ -114,8 +114,12 @@ export function sizeLoan(inp) {
 
 // Compare every product at the loan size computed for each (re-sized per product).
 export function compareProducts(base, products) {
-  return products.map((p) => {
+  const rows = products.map((p) => {
     const r = sizeLoan({ ...base, product: p, loanOverride: base.loanOverride ?? null });
-    return { name: p.name, secured: !!p.secured, ...r.summary, verdictText: r.summary.verdict.text };
+    return { name: p.name, secured: !!p.secured, ...r.summary, verdictText: r.summary.verdict.text, recommended: false };
   });
+  // Cheapest product that actually works (code "ok"); nothing is recommended when no loan is needed.
+  const works = rows.filter((x) => x.verdict.code === "ok");
+  if (works.length) works.reduce((a, b) => (b.totalCostOfBorrowing < a.totalCostOfBorrowing ? b : a)).recommended = true;
+  return rows;
 }

@@ -89,3 +89,15 @@ test("draw month override and loan override are honoured", () => {
   assert.equal(res.rows[1].cashWithLoan, res.rows[1].cash); // before draw
   assert.ok(Math.abs(res.rows[2].cashWithLoan - (res.rows[2].cash + 50000)) < 1e-6); // draw month: proceeds, no payment yet
 });
+
+test("compareProducts recommends the cheapest product that works, none when none needed", async () => {
+  const { compareProducts } = await import("../src/lib/loan.js");
+  const months = Array.from({ length: 24 }, (_, i) => ({ label: `2027-${String((i % 12) + 1).padStart(2, "0")}`, cash: i < 3 ? 5000 : -20000 + i * 500, reserve: 1000 }));
+  const prods = [{ name: "A", rate: 0.05, ioYears: 0, termYears: 5, feePct: 0, fixedFee: 0, secured: false }, { name: "B", rate: 0.12, ioYears: 0, termYears: 5, feePct: 0.05, fixedFee: 0, secured: false }];
+  const rows = compareProducts({ months, protectReserve: true, cushion: 0, roundTo: 100 }, prods);
+  const rec = rows.filter((r) => r.recommended);
+  assert.ok(rec.length <= 1);
+  if (rec.length) assert.equal(rec[0].verdict.code, "ok");
+  const flat = compareProducts({ months: months.map((m) => ({ ...m, cash: 50000 })), protectReserve: true, cushion: 0, roundTo: 100 }, prods);
+  assert.equal(flat.some((r) => r.recommended), false);
+});
