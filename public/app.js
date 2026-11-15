@@ -52,6 +52,7 @@ function lineChart(series, labels, { money = true } = {}) {
 function download(name, text, type) { const a = h("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name }); document.body.append(a); a.click(); a.remove(); }
 const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
+function addMonthsJs(ym, n) { const [y, m] = ym.split("-").map(Number), t = y * 12 + (m - 1) + n; return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`; }
 // ---------- Loan ----------
 const VERDICT_LABEL = { ok: "Works", "none-needed": "Not needed", caution: "Caution", equity: "Not enough home equity", infeasible: "Payments too high" };
 async function loanTab() {
@@ -98,6 +99,7 @@ async function loanTab() {
   };
   const f = {
     maxLtv: inp("number", Math.round(L.maxLtv * 1000) / 10, () => {}, { min: 0, max: 100 }), cushion: inp("number", L.cushion, () => {}, { min: 0 }),
+    payoffPct: inp("number", Math.round((L.payoffBudgetPct ?? 0.5) * 100), () => {}, { min: 0, max: 100 }),
     reserveMonths: inp("number", P.reserveMonths, () => {}, { min: 0 }), horizon: inp("number", L.horizonMonths, () => {}, { min: 6, max: 120 }),
     protect: h("select", { class: "in" }, h("option", { value: "Y" }, "Yes"), h("option", { value: "N" }, "No")),
     income: inp("number", P.incomeOverride, () => {}, { placeholder: "from Actual" }), expenses: inp("number", P.expensesOverride, () => {}, { placeholder: "from Actual" }), investing: inp("number", P.investingOverride, () => {}, { placeholder: "from Actual" }),
@@ -171,7 +173,7 @@ async function loanTab() {
     s.loan.product = selected;
     Object.assign(s.loan, { homeValue: src.homeValue.custom, mortgage: src.mortgage.custom, otherLiens: src.otherLiens.custom,
       homeValueAccount: src.homeValue.account, mortgageAccount: src.mortgage.account, otherLiensAccount: src.otherLiens.account, maxLtv: (+f.maxLtv.value || 0) / 100,
-      cushion: +f.cushion.value || 0, horizonMonths: +f.horizon.value || 60, protectReserve: f.protect.value === "Y" });
+      cushion: +f.cushion.value || 0, payoffBudgetPct: Math.min(1, Math.max(0, (+f.payoffPct.value || 0) / 100)), horizonMonths: +f.horizon.value || 60, protectReserve: f.protect.value === "Y" });
     Object.assign(s.projection, { reserveMonths: +f.reserveMonths.value || 0, incomeOverride: numOrNull(f.income), expensesOverride: numOrNull(f.expenses), investingOverride: numOrNull(f.investing) });
     S = await api("/api/settings", { method: "PUT", body: s });
   }
@@ -208,12 +210,35 @@ async function loanTab() {
         kp(usd(s.worstShortfall), "Worst gap without a loan"), kp(usd(s.paymentInterestOnly) + " / " + usd(s.paymentRepayment), "Payment: interest-only / repayment"),
         kp(pct(s.paymentPctOfSurplus), "Highest payment vs. monthly surplus"), kp(pct(s.combinedLtv), "Combined LTV")),
       lineChart([{ name: "Cash, no loan", color: "#888", dash: true, values: r.rows.map((x) => x.cash) }, { name: "Cash, with loan", color: "#1f5fbf", values: r.rows.map((x) => x.cashWithLoan) }, { name: "Reserve target", color: "#c55a11", dash: true, values: r.rows.map((x) => x.reserve) }], r.rows.map((x) => x.label)),
+      payoffSection(r),
       h("h2", {}, "Month by month"),
       table([{ label: "Month", key: "label" }, { label: "Cash, no loan", num: 1, render: (x) => usd(x.cash) }, { label: "Purchases", num: 1, render: (x) => usd(x.purchases) }, { label: "Reserve", num: 1, render: (x) => usd(x.reserve) },
         { label: "Cash, with loan", num: 1, render: (x) => usd(x.cashWithLoan) }, { label: "Loan payment", num: 1, render: (x) => usd(x.loanPayment) }, { label: "No loan", key: "statusNoLoan" }, { label: "With loan", key: "statusWithLoan" }], r.rows,
         { rowClass: (x) => (x.statusWithLoan === "SHORTFALL" ? "bad" : "") }));
   }
 
+  function payoffSection(r) {
+    const po = r.payoff;
+    if (!po || !po.plans.length) return null;
+    const best = po.plans.find((p) => p.key === po.bestKey), min = po.plans.find((p) => p.key === "minimum");
+    const yrs = (m) => (m % 12 === 0 ? m / 12 + " yr" : (m / 12).toFixed(1) + " yr");
+    const curves = [{ name: "Minimum payments", color: "#888", dash: true, p: min }, best && best.key !== "minimum" ? { name: best.name, color: "#1c7a3d", p: best } : null].filter(Boolean);
+    const len = Math.max(...curves.map((c) => c.p.balances.length));
+    const start = r.summary.drawLabel;
+    return [
+      h("h2", {}, "Payoff strategies (inside your budget)"),
+      h("div", { class: "card mute" }, `Payments may use up to ${usd(po.budgetCap)}/month (${Math.round((r.payoff.budgetCap / Math.max(1, r.assumptions.monthlySurplus)) * 100)}% of your ${usd(r.assumptions.monthlySurplus)} surplus), and cash must stay above your floor through the look-ahead window. Payoff times count from the draw month${start ? " (" + start + ")" : ""}.`),
+      best && best.key !== "minimum" ? h("div", { class: "verdict ok" }, `Best within budget: ${best.name.toLowerCase()}. Pay ${usd(best.payment)}/month, done by ${best.paidOffBy} (${yrs(best.months)}), saving ${usd(best.interestSaved)} in interest.`) :
+        h("div", { class: "verdict caution" }, min.withinBudget ? "No faster payoff fits inside your budget and cash floor, so the minimum payments are the practical choice (you can still pay extra whenever cash allows)." :
+          `Even the minimum payment (${usd(min.payment)}/month) is above your budget share (${usd(po.budgetCap)}/month) or would push cash under the floor. Try a longer-term loan from the comparison table, a smaller purchase, or a higher share in step 2.`),
+      table([{ label: "Strategy", render: (x) => h("span", {}, x.key === po.bestKey ? "★ " : "", x.name) }, { label: "Monthly payment", num: 1, render: (x) => usd(x.payment) }, { label: "Paid off by", render: (x) => `${x.paidOffBy || ""} (${yrs(x.months)})` },
+        { label: "Interest", num: 1, render: (x) => usd(x.totalInterest) }, { label: "Saved vs. minimum", num: 1, render: (x) => usd(x.interestSaved) }, { label: "Total cost", num: 1, render: (x) => usd(x.totalCost) },
+        { label: "% of surplus", num: 1, render: (x) => pct(x.pctOfSurplus) }, { label: "Cash stays above floor", render: (x) => (x.floorOk ? "Yes" : "No") }, { label: "Within budget", render: (x) => (x.withinBudget ? "Yes" : "No") }], po.plans,
+        { rowClass: (x) => (x.withinBudget ? (x.key === po.bestKey ? "sel" : "") : "bad") }),
+      h("div", { class: "mute" }, "Payoff plans use a fixed payment from the first month after the draw; the last payment is smaller. Total cost = interest + fees. Rows in red are over budget or would push cash under the floor."),
+      lineChart(curves.map((c) => ({ name: c.name, color: c.color, dash: c.dash, values: Array.from({ length: len }, (_, i) => (i < c.p.balances.length ? c.p.balances[i] : 0)) })), Array.from({ length: len }, (_, i) => (start ? addMonthsJs(start, i + 1) : String(i + 1)))),
+    ];
+  }
   go.addEventListener("click", () => calc(true));
   const field = (label, el, hint) => h("label", {}, label, el, hint ? h("small", { class: "mute" }, hint) : null);
   drawPurchases(); drawProducts();
@@ -224,14 +249,14 @@ async function loanTab() {
     h("div", { class: "card" }, acctNote ? h("div", { class: "warn" }, acctNote) : h("div", { class: "mute", style: "margin-bottom:8px" }, "Pick an Actual account to use its current balance (a mortgage shows as a positive amount owed), or choose Custom value and type a number."), h("div", { class: "row" },
       field("Home value: Actual account", src.homeValue.sel), field("Home value ($)", src.homeValue.num), field("Mortgage: Actual account", src.mortgage.sel), field("Mortgage balance ($)", src.mortgage.num),
       field("Other liens: Actual account", src.otherLiens.sel), field("Other liens ($)", src.otherLiens.num), field("Max combined LTV (%)", f.maxLtv, "usually 80-85"),
-      field("Keep a reserve?", f.protect, "reserve = months of spending"), field("Reserve (months)", f.reserveMonths), field("Extra cushion ($)", f.cushion), field("Look ahead (months)", f.horizon)),
+      field("Keep a reserve?", f.protect, "reserve = months of spending"), field("Reserve (months)", f.reserveMonths), field("Extra cushion ($)", f.cushion), field("Look ahead (months)", f.horizon), field("Max share of monthly surplus for loan payments (%)", f.payoffPct, "used for payoff strategies")),
       h("details", { style: "margin-top:10px" }, h("summary", { class: "mute" }, "Override what Actual says (monthly $)"), h("div", { class: "row", style: "margin-top:8px" }, field("Income", f.income), field("Spending", f.expenses), field("To investments/debt", f.investing)))),
     h("h2", {}, "3. Loans to compare"), h("div", { class: "card" }, prBox, h("div", { class: "mute", style: "margin-top:6px" }, "Rate and fee are percentages. Interest-only years: payments are interest only before the repayment term starts (a HELOC draw period).")),
     h("div", { class: "row", style: "margin:12px 0" }, go,
       h("details", {}, h("summary", { class: "mute" }, "Try a specific amount or draw month"), h("div", { class: "row", style: "margin-top:8px" }, field("Loan amount ($)", adv.loan), field("Draw month", adv.draw)))),
     msg, out, scenBox, scenOut);
   drawScenarios().catch((e) => fill(scenBox, h("div", { class: "err" }, e.message)));
-  if (purchases.length) calc(false);
+  if (purchases.length) calc(true); // saves too, so suggested accounts shown above are what the result uses
 }
 
 // ---------- Budget ----------

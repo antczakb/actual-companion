@@ -163,3 +163,15 @@ test("scenarios: save, list, view, load back into settings, delete", async () =>
   assert.equal((await h["GET /api/scenarios"]({})).length, 0);
   await assert.rejects(h["GET /api/scenario"]({ query: { id: "nope" } }), /not found/i);
 });
+
+test("loan: payoff strategies come back with the result", async () => {
+  const { h, settings } = make();
+  const s = settings.get(); s.loan.homeValue = 800000; s.loan.mortgage = 300000; s.loan.payoffBudgetPct = 0.5;
+  s.projection.purchases = [{ month: "2027-03", amount: 90000, name: "Kitchen" }]; settings.set(s);
+  const r = await h["GET /api/loan"]({ query: { product: "Personal loan" } });
+  assert.ok(r.payoff.plans.length >= 2);
+  assert.ok(Math.abs(r.payoff.budgetCap - 0.5 * r.assumptions.monthlySurplus) < 1e-6);
+  const min = r.payoff.plans.find((p) => p.key === "minimum");
+  assert.ok(Math.abs(min.totalInterest - r.summary.totalInterest) < 1);
+  assert.ok(r.payoff.plans.every((p) => !p.balances || p.key === "minimum" || p.key === r.payoff.bestKey));
+});

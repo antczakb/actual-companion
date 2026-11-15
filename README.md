@@ -112,3 +112,7 @@ If Actual itself serves HTTPS with its own certificate (a plain `http://` reques
 
 - In step 2, home value, mortgage and other liens can each come from an Actual account (its current balance; debts show as a positive amount owed) or a custom value. Accounts named like "House" or "Mortgage" are pre-selected the first time.
 - **Save scenario** stores your inputs and the result under a name (`scenarios.json` in the data folder). **View** shows the result as saved, **Load** puts the inputs back in the planner, and ticking two or more then **Compare selected** shows them side by side.
+
+### Payoff strategies
+
+Under the loan details, the app lists ways to pay the loan off early: fixed payments that clear it in 2, 3, 5, 7, 10 or 15 years (only those shorter than the loan's full term), plus the fastest payment that fits. A strategy is "within budget" when its payment is at most the share of monthly surplus you set in step 2 (default 50%) **and** cash stays above your floor through the look-ahead window. The ★ row is the cheapest one that fits.

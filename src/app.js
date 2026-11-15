@@ -1,6 +1,7 @@
 // Route handlers: pure functions of (request, dependencies) so they can be tested without a socket.
 import { monthlyFlows, trailingAverages, buildProjection } from "./lib/flows.js";
 import { sizeLoan, compareProducts } from "./lib/loan.js";
+import { payoffPlans } from "./lib/payoff.js";
 import { suggestBudget } from "./lib/suggest.js";
 import { parseVenmoCSV, matchVenmo } from "./lib/venmo.js";
 import { getSimpleFIN, toTables } from "./lib/simplefin.js";
@@ -50,13 +51,14 @@ export function createHandlers(d) {
         drawMonth: query.draw || null, monthlyIncome: income, monthlySurplus: income - expenses - investing,
       };
       const result = sizeLoan({ ...base, product, loanOverride: num(query.loan) });
+      const payoff = payoffPlans({ loan: result.summary.usedLoan, product, monthlySurplus: income - expenses - investing, budgetPct: L.payoffBudgetPct, rows: result.rows, draw: result.summary.drawIndex, drawLabel: result.summary.drawLabel });
       if (avg.monthsUsed < 3) warnings.push(`Only ${avg.monthsUsed} month(s) of transactions found to estimate income and spending; set overrides in Settings or wait for more data.`);
       if (!home.value) warnings.push("Home value is 0, so secured products show no equity room. Choose an Actual account or enter a value in step 2.");
       if (!P.purchases.length) warnings.push("No planned purchases entered in step 1; the projection only shows your baseline cash flow.");
       return {
         resolved: { homeValue: home, mortgage: mort, otherLiens: liens },
         assumptions: { cashToday: cash0, cashAccounts: cashAccts.map((a) => a.name), monthlyIncome: income, monthlyExpenses: expenses, monthlyInvesting: investing, monthlySurplus: income - expenses - investing, monthsOfHistory: avg.monthsUsed },
-        summary: result.summary, rows: result.rows, comparison: compareProducts(base, L.products), warnings, products: L.products.map((p) => p.name),
+        payoff, summary: result.summary, rows: result.rows, comparison: compareProducts(base, L.products), warnings, products: L.products.map((p) => p.name),
       };
   }
 
