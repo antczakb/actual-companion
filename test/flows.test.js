@@ -38,3 +38,17 @@ test("projection: cumulative cash, purchases, yearly step-ups, reserve", () => {
   assert.ok(Math.abs(m[12].expenses - 4400) < 1e-9); // month 13 = second year
   assert.ok(Math.abs(m[12].reserve - 3 * 4400) < 1e-9);
 });
+
+test("bonuses: one-time lands once, yearly repeats every 12 months, both add to cash", () => {
+  const base = { startMonth: "2026-11", horizon: 26, cash0: 0, income: 5000, expenses: 5000, investing: 0 };
+  const none = buildProjection(base);
+  const m = buildProjection({ ...base, bonuses: [{ month: "2027-03", amount: 10000, repeat: "once" }, { month: "2027-01", amount: 4000, repeat: "yearly" }] });
+  const at = (arr, l) => arr.find((x) => x.label === l);
+  assert.equal(at(m, "2027-03").bonuses, 10000);
+  assert.equal(at(m, "2027-01").bonuses, 4000);
+  assert.equal(at(m, "2028-01").bonuses, 4000);       // repeats a year later
+  assert.equal(at(m, "2027-02").bonuses, 0);
+  assert.equal(at(m, "2026-11").bonuses, 0);          // yearly never lands before its start month
+  assert.equal(at(m, "2027-03").cash - at(none, "2027-03").cash, 14000);
+  assert.equal(at(m, "2028-02").cash - at(none, "2028-02").cash, 18000); // 10000 once + 4000 (Jan 2027) + 4000 (Jan 2028)
+});

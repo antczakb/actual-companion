@@ -29,6 +29,7 @@ const actual = new FakeActual({
 });
 const settings = new SettingsStore(path.join(dir, "settings.json"));
 const s = settings.get(); 
+s.projection.bonuses = [{ name: "Annual bonus", month: ym(-2), amount: 12000, repeat: "yearly" }];
 s.projection.purchases = [{ month: ym(-5), amount: 85000, name: "Kitchen remodel" }, { month: ym(-14), amount: 30000, name: "Car" }];
 settings.set(s);
 const sample = { errors: [], accounts: [{ org: { name: "Demo Bank", domain: "demo.example" }, id: "ACT-1", name: "Checking", currency: "USD", balance: "24000.00", "available-balance": "23900.00", "balance-date": Math.floor(Date.now() / 1000),

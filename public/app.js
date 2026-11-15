@@ -140,6 +140,7 @@ const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"
 function addMonthsJs(ym, n) { const [y, m] = ym.split("-").map(Number), t = y * 12 + (m - 1) + n; return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`; }
 // ---------- Loan ----------
 const TIPS = {
+  bonuses: "Expected bonuses or other lump sums of cash coming in (after tax, as they land in your account). Each is added to projected cash in the month you pick. \"Every year\" repeats it every 12 months from that month. Your regular income already comes from Actual, so only enter bonuses that are NOT in your normal paychecks; a bonus you received in the last 12 months is already averaged into income.",
   purchases: "Large cash purchases you expect. Each one is subtracted from your projected cash in the month you pick. Loans are sized to cover the months where cash would otherwise fall below your floor.",
   situation: "Your cash, income, spending and investing come from Actual: cash is the balance of your on-budget accounts today; income, spending and investing are the average of the last 12 months of transactions (transfers to off-budget accounts count as investing, transfers between on-budget accounts are ignored).",
   homeValue: "Used for the equity limit on loans secured by your home: maximum loan = max combined LTV x home value - mortgage - other liens. Pick an Actual account to use its current balance, or type a value.",
@@ -184,10 +185,28 @@ async function loanTab() {
   ], extra: actualCheck });
   let S = await api("/api/settings"), selected = S.loan.product, accts = [], acctNote = "";
   try { accts = await api("/api/accounts"); } catch (e) { acctNote = "Could not read accounts from Actual (" + e.message + "). Enter values by hand."; }
-  const purchases = S.projection.purchases.map((p) => ({ ...p })), products = S.loan.products.map((p) => ({ ...p }));
+  const bonuses = (S.projection.bonuses || []).map((b) => ({ ...b })), purchases = S.projection.purchases.map((p) => ({ ...p })), products = S.loan.products.map((p) => ({ ...p }));
   const nextMonth = (k) => { const d = new Date(); d.setMonth(d.getMonth() + k); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
   const inp = (type, val, on, extra = {}) => { const e = h("input", { type, class: "in", step: "any", value: val ?? "", ...extra }); e.addEventListener("input", () => on(e)); return e; };
   const numOrNull = (e) => (e.value === "" ? null : Number(e.value));
+
+  // Expected bonuses (cash in)
+  const bBox = h("div");
+  function drawBonuses() {
+    const yr = bonuses.reduce((t, b) => t + (+b.amount || 0), 0);
+    fill(bBox,
+      bonuses.length ? h("div", { class: "tablewrap stackwrap" }, h("table", { class: "stack" }, h("thead", {}, h("tr", {}, ["What", "Month", "Amount after tax ($)", "How often", ""].map((x) => h("th", {}, x)))),
+        h("tbody", {}, bonuses.map((b, i) => {
+          const rep = h("select", {}, h("option", { value: "once" }, "Once"), h("option", { value: "yearly" }, "Every year")); rep.value = b.repeat === "yearly" ? "yearly" : "once"; rep.addEventListener("change", () => (b.repeat = rep.value));
+          return h("tr", {},
+            h("td", { "data-label": "What" }, inp("text", b.name, (e) => (b.name = e.value), { placeholder: "e.g. Annual bonus" })),
+            h("td", { "data-label": "Month" }, inp("month", b.month, (e) => (b.month = e.value))),
+            h("td", { "data-label": "Amount after tax ($)" }, inp("number", b.amount, (e) => { b.amount = e.value === "" ? 0 : +e.value; }, { min: 0, inputmode: "decimal" })),
+            h("td", { "data-label": "How often" }, rep),
+            h("td", { "data-label": "" }, h("button", { class: "alt", onclick: () => { bonuses.splice(i, 1); drawBonuses(); } }, "Remove")));
+        })))) : h("div", { class: "mute" }, "None yet. Add bonuses or other lump sums you expect to receive."),
+      h("div", { class: "row actions" }, h("button", { class: "alt", onclick: () => { bonuses.push({ name: "", month: nextMonth(2), amount: 0, repeat: "once" }); drawBonuses(); } }, "+ Add bonus"), h("span", { class: "mute" }, bonuses.length ? `Listed: ${usd(yr)} (yearly ones repeat)` : "")));
+  }
 
   // Step 1: planned purchases
   const pBox = h("div");
@@ -299,6 +318,7 @@ async function loanTab() {
   async function save() {
     S = await api("/api/settings"); // pick up anything changed in this tab's Settings panel
     const s = structuredClone(S);
+    s.projection.bonuses = bonuses.filter((b) => b.month || +b.amount).map((b) => ({ name: b.name || "", month: b.month, amount: +b.amount || 0, repeat: b.repeat === "yearly" ? "yearly" : "once" }));
     s.projection.purchases = purchases.filter((p) => p.month || +p.amount).map((p) => ({ name: p.name || "", month: p.month, amount: +p.amount || 0 }));
     s.loan.products = products.map((p) => ({ ...p, name: (p.name || "").trim() }));
     if (!s.loan.products.some((p) => p.name === selected)) selected = s.loan.products[0].name;
@@ -351,7 +371,7 @@ async function loanTab() {
       lineChart([{ name: "Cash, no loan", color: "#888", dash: true, values: r.rows.map((x) => x.cash) }, { name: "Cash, with loan", color: "#1f5fbf", values: r.rows.map((x) => x.cashWithLoan) }, { name: "Reserve target", color: "#c55a11", dash: true, values: r.rows.map((x) => x.reserve) }], r.rows.map((x) => x.label)),
       payoffSection(r),
       stepH(null, "Month by month"),
-      table([{ label: "Month", key: "label" }, { label: "Cash, no loan", num: 1, render: (x) => usd(x.cash) }, { label: "Purchases", num: 1, render: (x) => usd(x.purchases) }, { label: "Reserve", num: 1, tip: "Reserve target = reserve months x that month's spending (or your fixed amount).", render: (x) => usd(x.reserve) },
+      table([{ label: "Month", key: "label" }, { label: "Cash, no loan", num: 1, render: (x) => usd(x.cash) }, { label: "Bonuses", num: 1, render: (x) => (x.bonuses ? usd(x.bonuses) : "") }, { label: "Purchases", num: 1, render: (x) => usd(x.purchases) }, { label: "Reserve", num: 1, tip: "Reserve target = reserve months x that month's spending (or your fixed amount).", render: (x) => usd(x.reserve) },
         { label: "Cash, with loan", num: 1, tip: "Cash without the loan + (loan x (1 - fee % - payments so far per $1) - fixed fee).", render: (x) => usd(x.cashWithLoan) }, { label: "Loan payment", num: 1, render: (x) => usd(x.loanPayment) }, { label: "No loan", key: "statusNoLoan" }, { label: "With loan", key: "statusWithLoan" }], r.rows,
         { stack: false, rowClass: (x) => (x.statusWithLoan === "SHORTFALL" ? "bad" : "") }));
   }
@@ -383,10 +403,11 @@ async function loanTab() {
   }
   go.addEventListener("click", () => calc(true));
   const field = (label, el, hint, t) => h("label", {}, h("span", { class: "lbl" }, label, t ? tip(t) : null), el, hint ? h("small", { class: "mute" }, hint) : null);
-  drawPurchases(); drawProducts();
+  drawPurchases(); drawBonuses(); drawProducts();
   root.append(
     h("div", { class: "intro" }, h("b", {}, "Plan a large purchase."), " Blue boxes are inputs; everything else is calculated. Your cash, income and spending are read from Actual. Hover or tap the ", tip("Like this: an explanation of how the number is worked out."), " marks to see how each number is calculated."),
     stepH(1, "Planned large purchases", TIPS.purchases), h("div", { class: "card" }, pBox),
+    h("h3", {}, "Expected bonuses ", tip(TIPS.bonuses)), h("div", { class: "card" }, bBox),
     stepH(2, "Your situation", TIPS.situation),
     h("div", { class: "card" }, acctNote ? h("div", { class: "warn" }, acctNote) : h("div", { class: "mute note" }, "Pick an Actual account to use its current balance (a mortgage shows as a positive amount owed), or choose Custom value and type a number."), h("div", { class: "row fields" },
       field("Home value: account", src.homeValue.sel, null, TIPS.homeValue), field("Home value ($)", src.homeValue.num), field("Mortgage: account", src.mortgage.sel), field("Mortgage balance ($)", src.mortgage.num),

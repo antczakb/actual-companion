@@ -175,3 +175,9 @@ test("loan: payoff strategies come back with the result", async () => {
   assert.ok(Math.abs(min.totalInterest - r.summary.totalInterest) < 1);
   assert.ok(r.payoff.plans.every((p) => !p.balances || p.key === "minimum" || p.key === r.payoff.bestKey));
 });
+
+test("settings validation: bonuses need a YYYY-MM month and a valid repeat", async () => {
+  const { validateSettings } = await import("../src/config.js");
+  assert.ok(validateSettings({ projection: { bonuses: [{ month: "March", amount: 1 }] } }).some((e) => /bonuses\[0\]\.month/.test(e)));
+  assert.ok(validateSettings({ projection: { bonuses: [{ month: "2027-03", amount: 1, repeat: "weekly" }] } }).some((e) => /repeat/.test(e)));
+});

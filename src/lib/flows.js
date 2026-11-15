@@ -39,7 +39,9 @@ export function trailingAverages(flows, endMonthExclusive, n) {
 }
 
 // opts: {startMonth, horizon, cash0, income, expenses, investing, incomeGrowthPct, expenseInflationPct,
-//        reserveMonths, reserveFixed, purchases:[{month, amount, name}]}
+//        reserveMonths, reserveFixed, purchases:[{month, amount, name}],
+//        bonuses:[{month, amount, name, repeat:"once"|"yearly"}]  (extra cash in; "yearly" repeats every 12 months from that month)}
+const monthsBetween = (a, b) => { const [ay, am] = String(a).split("-").map(Number), [by, bm] = String(b).split("-").map(Number); return (by - ay) * 12 + (bm - am); };
 export function buildProjection(o) {
   const months = [];
   let cash = o.cash0;
@@ -49,9 +51,10 @@ export function buildProjection(o) {
     const inc = o.income * Math.pow(1 + (o.incomeGrowthPct || 0) / 100, yrs);
     const exp = o.expenses * Math.pow(1 + (o.expenseInflationPct || 0) / 100, yrs);
     const purchases = (o.purchases || []).filter((p) => p.month === label).reduce((s, p) => s + (+p.amount || 0), 0);
-    cash += inc - exp - (o.investing || 0) - purchases;
+    const bonuses = (o.bonuses || []).filter((b) => (b.repeat === "yearly" ? monthsBetween(b.month, label) >= 0 && monthsBetween(b.month, label) % 12 === 0 : b.month === label)).reduce((s, b) => s + (+b.amount || 0), 0);
+    cash += inc + bonuses - exp - (o.investing || 0) - purchases;
     const reserve = o.reserveFixed != null ? o.reserveFixed : (o.reserveMonths || 0) * exp;
-    months.push({ label, income: inc, expenses: exp, investing: o.investing || 0, purchases, cash, reserve });
+    months.push({ label, income: inc, bonuses, expenses: exp, investing: o.investing || 0, purchases, cash, reserve });
   }
   return months;
 }

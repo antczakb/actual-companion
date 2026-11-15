@@ -42,7 +42,7 @@ export function createHandlers(d) {
       };
       const home = resolve("Home value", L.homeValue, L.homeValueAccount, false), mort = resolve("Mortgage", L.mortgage, L.mortgageAccount, true), liens = resolve("Other liens", L.otherLiens, L.otherLiensAccount, true);
       const months = buildProjection({ startMonth: month0(), horizon: L.horizonMonths, cash0, income, expenses, investing,
-        incomeGrowthPct: P.incomeGrowthPct, expenseInflationPct: P.expenseInflationPct, reserveMonths: P.reserveMonths, reserveFixed: P.reserveFixed, purchases: P.purchases });
+        incomeGrowthPct: P.incomeGrowthPct, expenseInflationPct: P.expenseInflationPct, reserveMonths: P.reserveMonths, reserveFixed: P.reserveFixed, purchases: P.purchases, bonuses: P.bonuses || [] });
       const product = L.products.find((p) => p.name === (query.product || L.product));
       if (!product) throw httpErr(400, "Unknown loan product.");
       const base = {
