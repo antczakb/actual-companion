@@ -7,14 +7,16 @@ import { parseVenmoCSV, matchVenmo } from "./lib/venmo.js";
 import { getSimpleFIN, toTables } from "./lib/simplefin.js";
 import { diagnoseUrl } from "./lib/diagnose.js";
 import { addMonths, currentMonth, lastDayOf } from "./lib/dates.js";
+import { ASSET_TYPES } from "./lib/assets.js";
+import { localDate } from "./lib/schedule.js";
 
 const httpErr = (status, message) => Object.assign(new Error(message), { status });
 const num = (v) => (v === undefined || v === "" || v === null ? null : Number.isFinite(+v) ? +v : null);
 
 export function createHandlers(d) {
-  const { actual, snaptrade, store, settings, simplefin, scenarios, now = () => new Date() } = d;
+  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, snapshotState, now = () => new Date() } = d;
   const month0 = () => currentMonth(now());
-  const today = () => now().toISOString().slice(0, 10);
+  const today = () => localDate(now());
 
   async function loadFlows(trailing) {
     const start = `${addMonths(month0(), -trailing)}-01`;
@@ -69,7 +71,7 @@ export function createHandlers(d) {
       };
   }
 
-  return {
+  const routes = {
     "GET /api/status": async () => ({
       actual: actual.configured(), simplefin: !!simplefin.accessUrl, snaptrade: !!snaptrade?.configured(), snaptradeConnected: !!snaptrade?.connected?.(),
     }),
@@ -169,7 +171,39 @@ export function createHandlers(d) {
       for (const id of ids) if (!done.includes(id)) skipped.push(id);
       return { updated: done.length, skipped };
     },
+
+    "GET /api/assets": async () => ({ types: ASSET_TYPES, ...assets.view(today()) }),
+    "POST /api/assets": async ({ body }) => assets.upsert(body || {}),
+    "POST /api/assets/value": async ({ body }) => { assets.setValue(body?.id, { date: body?.date || today(), value: body?.value, note: body?.note }); return { ok: true }; },
+    "POST /api/assets/value/delete": async ({ body }) => { assets.removeValue(body?.id, body?.date); return { ok: true }; },
+    "POST /api/assets/delete": async ({ body }) => { if (!assets.remove(body?.id)) throw httpErr(404, "Asset not found."); return { ok: true }; },
+
+    "GET /api/snapshot/status": async () => ({ ...settings.get().snapshots, ...snapshotState.read(), serverTime: now().toString() }),
+    "POST /api/snapshot/run": async () => runSnapshot(),
   };
+
+  // End-of-day snapshot: investment balances from SnapTrade, plus today's balance for assets linked to an Actual account.
+  async function runSnapshot() {
+    const date = today(), out = { date, investments: 0, assets: 0, notes: [] };
+    if (snaptrade?.configured()) {
+      try { const accts = await snaptrade.fetchAll(); if (accts.length) { store.record(date, accts); out.investments = accts.length; } else out.notes.push("SnapTrade returned no accounts."); }
+      catch (e) { out.notes.push(`SnapTrade: ${e.message}`); }
+    } else out.notes.push("SnapTrade not configured; investments skipped.");
+    const linked = assets.list().filter((a) => a.actualAccount);
+    if (linked.length) {
+      try {
+        const accts = await actual.getAccounts();
+        for (const a of linked) {
+          const acct = accts.find((x) => x.name === a.actualAccount);
+          if (!acct) { out.notes.push(`Actual account "${a.actualAccount}" for ${a.name} was not found.`); continue; }
+          assets.setValue(a.id, { date, value: Math.abs(acct.balance), source: "actual" }); out.assets++;
+        }
+      } catch (e) { out.notes.push(`Actual: ${e.message}`); }
+    }
+    return out;
+  }
+  Object.defineProperty(routes, "runSnapshot", { value: runSnapshot, enumerable: false });
+  return routes;
 
   async function venmoMatch(csv) {
     if (!csv || typeof csv !== "string") throw httpErr(400, "No CSV text received.");

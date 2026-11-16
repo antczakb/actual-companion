@@ -8,6 +8,8 @@ import { createHandlers } from "./app.js";
 import { SettingsStore } from "./config.js";
 import { SnapshotStore } from "./lib/investments.js";
 import { ScenarioStore } from "./lib/scenarios.js";
+import { AssetStore } from "./lib/assets.js";
+import { SnapshotState, createSnapshotJob } from "./lib/schedule.js";
 import { ActualAdapter } from "./adapters/actual.js";
 import { SnapTradeAdapter } from "./adapters/snaptrade.js";
 
@@ -56,14 +58,19 @@ export function createServer({ handlers, password, publicDir = PUBLIC, maxBody =
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const E = process.env, dataDir = E.DATA_DIR || "./data";
   if (!E.APP_PASSWORD && E.ALLOW_NO_AUTH !== "1") { console.error("Set APP_PASSWORD (this app shows your finances). For local testing only: ALLOW_NO_AUTH=1."); process.exit(1); }
+  const settingsStore = new SettingsStore(path.join(dataDir, "settings.json"));
+  const snapshotState = new SnapshotState(path.join(dataDir, "snapshot-state.json"));
   const handlers = createHandlers({
     actual: new ActualAdapter({ serverUrl: E.ACTUAL_SERVER_URL, password: E.ACTUAL_PASSWORD, syncId: E.ACTUAL_SYNC_ID, budgetPassword: E.ACTUAL_BUDGET_PASSWORD, dataDir: path.join(dataDir, "actual-cache") }),
     snaptrade: new SnapTradeAdapter({ clientId: E.SNAPTRADE_CLIENT_ID, consumerKey: E.SNAPTRADE_CONSUMER_KEY, userFile: path.join(dataDir, "snaptrade-user.json") }),
     store: new SnapshotStore(path.join(dataDir, "investments.json")),
-    settings: new SettingsStore(path.join(dataDir, "settings.json")),
+    settings: settingsStore,
     scenarios: new ScenarioStore(path.join(dataDir, "scenarios.json")),
+    assets: new AssetStore(path.join(dataDir, "assets.json")),
+    snapshotState,
     simplefin: { accessUrl: E.SIMPLEFIN_ACCESS_URL, cachePath: path.join(dataDir, "simplefin-cache.json") },
   });
   const port = +E.PORT || 3000;
+  if (E.DISABLE_SCHEDULER !== "1") createSnapshotJob({ run: handlers.runSnapshot, getSettings: () => settingsStore.get().snapshots, state: snapshotState }).start();
   createServer({ handlers, password: E.APP_PASSWORD }).listen(port, E.HOST || "0.0.0.0", () => console.log(`Actual companion listening on :${port}`));
 }

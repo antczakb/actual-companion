@@ -6,6 +6,8 @@ import { createHandlers } from "../src/app.js";
 import { createServer } from "../src/server.js";
 import { SettingsStore } from "../src/config.js";
 import { SnapshotStore } from "../src/lib/investments.js";
+import { AssetStore } from "../src/lib/assets.js";
+import { SnapshotState } from "../src/lib/schedule.js";
 import { ScenarioStore } from "../src/lib/scenarios.js";
 import { FakeActual } from "../test/fakes.js";
 
@@ -37,7 +39,13 @@ const sample = { errors: [], accounts: [{ org: { name: "Demo Bank", domain: "dem
 const invStore = new SnapshotStore(path.join(dir, "inv.json"));
 { let ira = 52000, brk = 18000; for (let k = 14; k >= 0; k--) { const d = new Date(now.getTime() - k * 14 * 864e5).toISOString().slice(0, 10); ira = ira * (1 + Math.sin(k * 1.7) * 0.02 + 0.006) + 400; brk = brk * (1 + Math.cos(k * 1.3) * 0.025 + 0.004);
   invStore.record(d, [{ accountId: "ira", name: "Roth IRA", institution: "Demo Brokerage", balance: Math.round(ira), cash: 200, holdings: [] }, { accountId: "brk", name: "Taxable", institution: "Demo Brokerage", balance: Math.round(brk), cash: 50, holdings: [] }]); } }
-const handlers = createHandlers({ actual, snaptrade: null, store: invStore, settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
+const assets = new AssetStore(path.join(dir, "assets.json"));
+{ const home = assets.upsert({ name: "Primary home", type: "home", actualAccount: "House" }), car = assets.upsert({ name: "2021 Tacoma", type: "vehicle" }), rv = assets.upsert({ name: "Travel camper", type: "camper" });
+  const d = (k) => new Date(Date.now() - k * 864e5).toISOString().slice(0, 10);
+  [[300, 600000], [200, 615000], [100, 628000], [10, 640000]].forEach(([k, v]) => assets.setValue(home.id, { date: d(k), value: v }));
+  [[330, 34000], [150, 31500], [20, 30200]].forEach(([k, v]) => assets.setValue(car.id, { date: d(k), value: v, note: "KBB trade-in" }));
+  [[400, 42000], [120, 38500]].forEach(([k, v]) => assets.setValue(rv.id, { date: d(k), value: v })); }
+const handlers = createHandlers({ assets, snapshotState: new SnapshotState(path.join(dir, "st.json")), actual, snaptrade: null, store: invStore, settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
   simplefin: { accessUrl: "http://demo:demo@127.0.0.1/simplefin", fetchImpl: async () => ({ ok: true, json: async () => sample }) } });
 const port = +process.env.PORT || 3100;
 createServer({ handlers, password: null }).listen(port, "127.0.0.1", () => console.log(`Demo (made-up data) on http://127.0.0.1:${port}`));

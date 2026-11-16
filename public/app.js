@@ -494,8 +494,18 @@ function investTab() {
       showShape(h("div", { class: "card" }, h("div", { class: "row" }, h("b", {}, "SnapTrade response shape (names and types only)"), h("button", { class: "alt", onclick: () => showShape() }, "Close")), h("pre", { style: "overflow:auto;max-height:300px;margin:8px 0 0" }, JSON.stringify(r, null, 1))));
     } catch (e) { showShape(h("div", { class: "err" }, e.message), h("button", { class: "alt", onclick: () => showShape() }, "Close")); } finally { shapeBtn.disabled = false; }
   });
-  settingsBar(root, { extra: () => h("div", { class: "row actions" }, shapeBtn, h("span", { class: "mute" }, "Diagnostic: shows the names and types of fields SnapTrade returns (no balances or account numbers), useful if a brokerage looks wrong.")) });
-  root.append(h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept."))), shapeBox, out);
+  const snapStatus = h("div", { class: "mute" });
+  api("/api/snapshot/status").then((st) => {
+    const when = st.lastRunAt ? new Date(st.lastRunAt).toLocaleString() : null;
+    fill(snapStatus, st.enabled ? `Automatic snapshot runs every day at ${st.time} (server time).` : "Automatic daily snapshot is off.", " ", when ? `Last run: ${when}.` : "It has not run yet.", st.lastError ? ` Last attempt failed: ${st.lastError.message}` : "");
+  }).catch(() => {});
+  settingsBar(root, {
+    fields: [
+      { path: "snapshots.enabled", label: "Take a snapshot automatically every day", type: "bool", tip: "Once a day at the time below, the app reads your brokerage balances (SnapTrade) and the Actual accounts linked to your assets, and stores them. The server must be running at that time; if it is down, that day is skipped." },
+      { path: "snapshots.time", label: "Time of day (server clock)", type: "time", hint: "Default 23:55. Uses the time zone of the container; set it with timedatectl set-timezone if it is wrong." },
+    ],
+    extra: () => h("div", {}, snapStatus, h("div", { class: "row actions" }, shapeBtn, h("span", { class: "mute" }, "Diagnostic: shows the names and types of fields SnapTrade returns (no balances or account numbers), useful if a brokerage looks wrong."))) });
+  root.append(h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept. A snapshot is also taken automatically each night; see Settings."))), shapeBox, out);
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
 
@@ -581,6 +591,8 @@ function settingsBar(root, { fields = [], extra = null, title = "Settings" } = {
       const v = getPath(S, f.path), scale = f.scale || 1; let el, read;
       if (f.type === "number") { el = h("input", { type: "number", class: "in", step: "any", inputmode: "decimal", value: v == null ? "" : Math.round(v * scale * 1e6) / 1e6, placeholder: f.nullable ? "none" : "" }); read = () => (el.value === "" ? (f.nullable ? null : 0) : Number(el.value) / scale); }
       else if (f.type === "text") { el = h("input", { type: "text", class: "in", value: v || "" }); read = () => el.value; }
+      else if (f.type === "bool") { el = h("input", { type: "checkbox" }); el.checked = !!v; read = () => el.checked; }
+      else if (f.type === "time") { el = h("input", { type: "time", class: "in", value: v || "" }); read = () => el.value; }
       else if (f.type === "list") { el = h("input", { type: "text", class: "in", value: (v || []).join(", "), placeholder: "separate with commas" }); read = () => el.value.split(",").map((x) => x.trim()).filter(Boolean); }
       else if (f.type === "accounts") {
         const chosen = new Set(v || []); const boxes = accts.map((a) => { const c = h("input", { type: "checkbox" }); c.checked = chosen.has(a.name); return { a, c }; });
@@ -609,6 +621,62 @@ function settingsBar(root, { fields = [], extra = null, title = "Settings" } = {
   });
   root.append(h("div", { class: "toolbar" }, btn), box);
 }
+
+// ---------- Assets: house, vehicles, camper ----------
+const ASSET_LABEL = { home: "Home", vehicle: "Vehicle", camper: "Camper / RV", other: "Other" };
+function assetsTab() {
+  const root = $("assets"), out = h("div"), today = new Date().toISOString().slice(0, 10);
+  const field = (label, el) => h("label", { class: "setfield" }, h("span", { class: "lbl" }, label), el);
+  const mk = (type, val, extra = {}) => h("input", { type, class: "in", step: "any", value: val ?? "", ...extra });
+  let accounts = [];
+  const acctSelect = (cur) => { const s = h("select", {}, h("option", { value: "" }, "None, I'll enter values by hand"), accounts.map((a) => h("option", { value: a.name }, `${a.name} (${usd(a.balance)})`))); s.value = cur || ""; return s; };
+  const guard = (box, fn) => async () => { try { await fn(); } catch (e) { box.replaceChildren(h("div", { class: "err" }, e.message)); } };
+
+  function assetForm(a, done) {
+    const name = mk("text", a?.name, { placeholder: "e.g. Primary home" }), type = h("select", {}, Object.entries(ASSET_LABEL).map(([k, v]) => h("option", { value: k }, v))); type.value = a?.type || "home";
+    const link = acctSelect(a?.actualAccount), msg = h("div"), val = mk("number", "", { min: 0, inputmode: "decimal", placeholder: "Current value" });
+    const save = h("button", { class: "act" }, a ? "Save changes" : "Add asset");
+    save.addEventListener("click", guard(msg, async () => {
+      const rec = await api("/api/assets", { body: { id: a?.id, name: name.value, type: type.value, actualAccount: link.value || null } });
+      if (!a && val.value !== "") await api("/api/assets/value", { body: { id: rec.id, date: today, value: +val.value, note: "Starting value" } });
+      done();
+    }));
+    return h("div", { class: "card" }, h("div", { class: "row fields" }, field("Name", name), field("Type", type), field("Take the value from an Actual account", link), a ? null : field("Value today ($)", val)),
+      h("small", { class: "mute" }, "Linking to an Actual account records that account's balance in each nightly snapshot, so the value updates by itself. Without a link, type in a new value whenever you check Zillow, KBB or a dealer quote."),
+      h("div", { class: "row actions" }, save, h("button", { class: "alt", onclick: done }, "Cancel")), msg);
+  }
+
+  function assetCard(a) {
+    const msg = h("div"), cur = a.current, stale = a.daysOld != null && a.daysOld > 90 && !a.actualAccount;
+    const val = mk("number", "", { min: 0, inputmode: "decimal", placeholder: "New value" }), date = mk("date", today), note = mk("text", "", { placeholder: "Note (optional), e.g. KBB trade-in" });
+    const saveV = h("button", { class: "act" }, "Save value");
+    saveV.addEventListener("click", guard(msg, async () => { await api("/api/assets/value", { body: { id: a.id, date: date.value, value: val.value === "" ? null : +val.value, note: note.value } }); await load(); }));
+    const delta = (v, label) => (v == null ? null : h("span", { class: v >= 0 ? "up" : "down" }, `${v >= 0 ? "+" : "-"}${usd(Math.abs(v))} ${label}`));
+    const hist = h("details", {}, h("summary", {}, `History (${a.values.length})`), table([{ label: "Date", key: "date" }, { label: "Value", num: 1, render: (x) => usd(x.value) }, { label: "Source", render: (x) => (x.source === "actual" ? "Actual account" : "Entered by hand") }, { label: "Note", key: "note" },
+      { label: "", render: (x) => h("button", { class: "alt", onclick: guard(msg, async () => { if (confirm(`Delete the ${x.date} entry?`)) { await api("/api/assets/value/delete", { body: { id: a.id, date: x.date } }); await load(); } }) }, "Delete") }], a.values.slice().reverse(), { stack: a.values.length < 30 }));
+    const edit = h("button", { class: "alt", onclick: () => card.replaceWith(h("div", {}, assetForm(a, () => load()))) }, "Edit"), del = h("button", { class: "alt", onclick: guard(msg, async () => { if (confirm(`Remove ${a.name} and its history?`)) { await api("/api/assets/delete", { body: { id: a.id } }); await load(); } }) }, "Remove");
+    const card = h("div", { class: "card asset" },
+      h("div", { class: "row" }, h("b", { class: "hval" }, a.name), h("span", { class: "pill" }, ASSET_LABEL[a.type] || a.type), a.actualAccount ? h("span", { class: "mute" }, `from Actual: ${a.actualAccount}`) : null, h("span", { style: "flex:1" }), edit, del),
+      cur ? h("div", { class: "row" }, h("b", { style: "font-size:1.5rem" }, usd(cur.value)), h("span", { class: "mute" }, `as of ${cur.date}${a.daysOld ? ` (${a.daysOld} days ago)` : ""}`), delta(a.changeSincePrevious, "since previous"), delta(a.changeSinceFirst, `since ${a.firstDate}`)) : h("div", { class: "mute" }, "No value yet. Enter one below."),
+      stale ? h("div", { class: "warn" }, `This value is ${a.daysOld} days old. Update it so the history stays meaningful.`) : null,
+      h("div", { class: "row fields" }, field("New value ($)", val), field("As of", date), field("Note", note)), h("div", { class: "row actions" }, saveV), msg, a.values.length ? hist : null);
+    return card;
+  }
+
+  async function load() {
+    const [r, accts] = await Promise.all([api("/api/assets"), api("/api/accounts").catch(() => [])]); accounts = accts;
+    const total = r.assets.reduce((s, a) => s + (a.current ? a.current.value : 0), 0);
+    const addBox = h("div"), addBtn = h("button", { class: "act", onclick: () => fill(addBox, assetForm(null, () => load())) }, "+ Add asset");
+    fill(out,
+      h("div", { class: "kpis" }, h("div", { class: "kpi" }, h("b", {}, usd(total)), h("span", {}, "Total, latest values")), h("div", { class: "kpi" }, h("b", {}, r.assets.length), h("span", {}, "Assets tracked"))),
+      h("div", { class: "row actions" }, addBtn), addBox,
+      !r.assets.length ? h("div", { class: "mute" }, "Add your house, vehicles and camper. Mortgage and loan balances stay in Actual; this tab tracks what the things are worth.") : null,
+      r.series.length ? [h("h2", {}, "Value over time"), historyChart(r.series)] : null,
+      r.assets.map(assetCard));
+  }
+  root.append(h("div", { class: "mute" }, "Track what your home, vehicles and camper are worth. Enter a value whenever you look one up, or link an asset to an Actual account and it updates in the nightly snapshot."), out);
+  load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
+}
 // "Test connection to Actual" button, used in the settings of the tabs that read Actual.
 function actualCheck() {
   const chk = h("button", { class: "alt" }, "Test connection to Actual"), out = h("span", { class: "mute" });
@@ -618,7 +686,7 @@ function actualCheck() {
 
 // ---------- shell ----------
 const loaded = {};
-const inits = { loan: loanTab, budget: budgetTab, invest: investTab, simplefin: simplefinTab, venmo: venmoTab };
+const inits = { loan: loanTab, budget: budgetTab, invest: investTab, assets: assetsTab, simplefin: simplefinTab, venmo: venmoTab };
 async function show(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("main section").forEach((s) => (s.hidden = s.id !== name));

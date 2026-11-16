@@ -116,3 +116,8 @@ If Actual itself serves HTTPS with its own certificate (a plain `http://` reques
 ### Payoff strategies
 
 Under the loan details, the app lists ways to pay the loan off early: fixed payments that clear it in 2, 3, 5, 7, 10 or 15 years (only those shorter than the loan's full term), plus the fastest payment that fits. A strategy is "within budget" when its payment is at most the share of monthly surplus you set in step 2 (default 50%) **and** cash stays above your floor through the look-ahead window. The ★ row is the cheapest one that fits.
+
+## Nightly snapshot and tracked assets (v0.1.14)
+
+- The server takes one snapshot a day at the time set in Invest > Settings (default 23:55, **server clock**). It records SnapTrade balances and, for any asset linked to an Actual account, that account's balance. If the container is off at that time, that day is skipped. Check the time zone with `date`; fix it with `timedatectl set-timezone America/New_York`. Disable the timer entirely with `DISABLE_SCHEDULER=1`.
+- The Assets tab tracks a home, vehicles and a camper as dated values (`assets.json` in the data directory). There is no automatic price lookup (Zillow, KBB and similar do not offer a free personal API), so enter a value whenever you look one up, or link the asset to an Actual account you keep updated. Values older than 90 days are flagged.
