@@ -4,6 +4,7 @@ import { sizeLoan, compareProducts } from "./lib/loan.js";
 import { payoffPlans } from "./lib/payoff.js";
 import { suggestBudget } from "./lib/suggest.js";
 import { parseVenmoCSV, matchVenmo } from "./lib/venmo.js";
+import { parseAmazonCSV, matchAmazon } from "./lib/amazon.js";
 import { getSimpleFIN, toTables } from "./lib/simplefin.js";
 import { diagnoseUrl } from "./lib/diagnose.js";
 import { addMonths, currentMonth, lastDayOf } from "./lib/dates.js";
@@ -172,6 +173,23 @@ export function createHandlers(d) {
       return { updated: done.length, skipped };
     },
 
+    "POST /api/amazon/preview": async ({ body }) => (await amazonMatch(body?.csv)).view,
+    "POST /api/amazon/apply": async ({ body }) => {
+      const keys = new Set((body.keys || []).map(String));
+      if (!keys.size) throw httpErr(400, "Nothing selected.");
+      const { result } = await amazonMatch(body.csv);
+      const overrides = body.categoryOverrides || {}, done = [];
+      for (const m of result.matched) {
+        if (!keys.has(m.charge.key)) continue;
+        const fields = { notes: m.proposal.notes };
+        const cat = overrides[m.charge.key] ?? m.proposal.categoryId;
+        if (cat && (!m.bank.categoryId || body.replaceCategory || overrides[m.charge.key])) fields.category = cat;
+        await actual.updateTransaction(m.bank.id, fields);
+        done.push(m.charge.key);
+      }
+      return { updated: done.length, skipped: [...keys].filter((k) => !done.includes(k)) };
+    },
+
     "GET /api/assets": async () => ({ types: ASSET_TYPES, ...assets.view(today()) }),
     "POST /api/assets": async ({ body }) => assets.upsert(body || {}),
     "POST /api/assets/value": async ({ body }) => { assets.setValue(body?.id, { date: body?.date || today(), value: body?.value, note: body?.note }); return { ok: true }; },
@@ -204,6 +222,32 @@ export function createHandlers(d) {
   }
   Object.defineProperty(routes, "runSnapshot", { value: runSnapshot, enumerable: false });
   return routes;
+
+  async function amazonMatch(csv) {
+    if (!csv || typeof csv !== "string") throw httpErr(400, "No CSV text received.");
+    const a = settings.get().amazon;
+    let parsed;
+    try { parsed = parseAmazonCSV(csv); } catch (e) { throw httpErr(400, e.message); }
+    if (!parsed.items.length) throw httpErr(400, "No orders found in that CSV.");
+    const dates = parsed.items.map((r) => r.shipDate || r.date).sort();
+    const pad = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+    const [bank, categories, accounts] = await Promise.all([actual.getTransactions(pad(dates[0], -a.dayWindow - 1), pad(dates.at(-1), a.dayWindow + 1)), actual.getCategories(), actual.getAccounts()]);
+    const result = matchAmazon(parsed.items, bank, categories, { windowDays: a.dayWindow, payeeRegex: a.payeeRegex, keywordCategories: a.keywordCategories });
+    const catName = new Map(categories.map((c) => [c.id, `${c.groupName}: ${c.name}`])), acctName = new Map(accounts.map((x) => [x.id, x.name]));
+    const itemsText = (c) => c.items.map((i) => i.name).join(" | ");
+    const view = {
+      counts: { itemRows: parsed.items.length, matched: result.matched.length, unmatchedOrders: result.unmatchedOrders.length, unmatchedBank: result.unmatchedBank.length, alreadyApplied: result.alreadyApplied, skipped: parsed.skipped.length },
+      matched: result.matched.map((m) => ({
+        key: m.charge.key, bankDate: m.bank.date, daysApart: m.daysApart, amount: -m.bank.amount, bankAccount: acctName.get(m.bank.accountId) || "", bankPayee: m.bank.importedPayee || m.bank.payeeName,
+        items: m.charge.items.map((i) => ({ name: i.name, qty: i.qty, amount: i.amount })), notes: m.proposal.notes, categoryId: m.proposal.categoryId, category: m.proposal.categoryId ? catName.get(m.proposal.categoryId) : "",
+        categorySource: m.proposal.categorySource || "", keepsExistingCategory: !!m.bank.categoryId, existingCategory: m.bank.categoryId ? catName.get(m.bank.categoryId) || "" : "", mixed: !!m.proposal.mixed,
+      })),
+      unmatchedOrders: result.unmatchedOrders.map((o) => ({ key: o.key, date: o.date, amount: o.amount, items: itemsText(o), reason: o.reason })),
+      unmatchedBank: result.unmatchedBank.map((b) => ({ date: b.date, amount: -b.amount, payee: b.importedPayee || b.payeeName, account: acctName.get(b.accountId) || "" })),
+      categories: categories.filter((c) => !c.isIncome && !c.hidden).map((c) => ({ id: c.id, name: `${c.groupName}: ${c.name}` })),
+    };
+    return { result, view };
+  }
 
   async function venmoMatch(csv) {
     if (!csv || typeof csv !== "string") throw httpErr(400, "No CSV text received.");

@@ -121,3 +121,7 @@ Under the loan details, the app lists ways to pay the loan off early: fixed paym
 
 - The server takes one snapshot a day at the time set in Invest > Settings (default 23:55, **server clock**). It records SnapTrade balances and, for any asset linked to an Actual account, that account's balance. If the container is off at that time, that day is skipped. Check the time zone with `date`; fix it with `timedatectl set-timezone America/New_York`. Disable the timer entirely with `DISABLE_SCHEDULER=1`.
 - The Assets tab tracks a home, vehicles and a camper as dated values (`assets.json` in the data directory). There is no automatic price lookup (Zillow, KBB and similar do not offer a free personal API), so enter a value whenever you look one up, or link the asset to an Actual account you keep updated. Values older than 90 days are flagged.
+
+## Amazon order detail (v0.1.15)
+
+Amazon has no personal API. Request your data from Amazon (Account > Request My Data > Your Orders), unzip, and upload `Retail.OrderHistory.1.csv` in the Amazon tab. Each order (or each shipment, since Amazon bills per shipment) is matched to a bank charge by exact amount within the date window. Applying adds the item names to the transaction notes with an `[amzn:ORDER]` marker (so a re-run skips it) and sets a category from your item keywords. Columns are found by name; if a file is not recognized the error lists the column names it saw.

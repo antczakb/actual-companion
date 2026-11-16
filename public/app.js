@@ -575,6 +575,46 @@ function venmoTab() {
   root.append(h("div", { class: "card" }, h("div", { class: "mute", style: "margin-bottom:8px" }, "On venmo.com: Statements, pick a month, Download CSV. Preview shows what would change; nothing is written until you press Apply."), h("div", { class: "row" }, file, go), area), out);
 }
 
+function amazonTab() {
+  settingsBar($("amazon"), { fields: [
+    { path: "amazon.dayWindow", type: "number", label: "Match within (days)", hint: "Amazon bills when an order ships, so allow a few days around the ship date.", tip: "An order (or one shipment of it) matches a bank charge when the total is equal to the cent and the dates are within this many days." },
+    { path: "amazon.payeeRegex", type: "text", label: "Bank payee pattern", hint: "Bank rows whose payee matches this are treated as Amazon.", tip: "A pattern (case-insensitive) matched against the bank payee, imported payee and notes. 'amazon|amzn' catches AMZN Mktp, Amazon.com and Prime Video." },
+    { path: "amazon.keywordCategories", type: "kv", label: "Categorize by item keyword", kvLabels: ["Word in the item name", "Actual category name"], hint: "If an item name contains the word, that order gets that category. With several items, the one that costs the most decides; you can change it before applying." },
+  ], extra: actualCheck });
+  const root = $("amazon"), out = h("div"), file = h("input", { type: "file", accept: ".csv,text/csv" }), area = h("textarea", { rows: 4, placeholder: "...or paste the CSV text here", style: "width:100%" }), go = h("button", { class: "act" }, "Preview matches");
+  let csv = "";
+  file.addEventListener("change", async () => { const f = file.files[0]; if (f) { csv = await f.text(); area.value = ""; } });
+  async function preview() {
+    const text = area.value.trim() || csv; if (!text) { fill(out, h("div", { class: "err" }, "Choose an Amazon order history CSV first.")); return; }
+    await busy(go, out, async () => {
+      const r = await api("/api/amazon/preview", { body: { csv: text } }), c = r.counts, picks = new Map(), cats = new Map();
+      const apply = h("button", { class: "act" }, "Apply selected to Actual"), msg = h("div"), replace = h("input", { type: "checkbox" });
+      const rows = r.matched.map((m) => {
+        const cb = h("input", { type: "checkbox", checked: true }); picks.set(m.key, cb);
+        const sel = h("select", {}, h("option", { value: "" }, m.keepsExistingCategory ? `(keep: ${m.existingCategory || "existing"})` : "(none)"), r.categories.map((k) => h("option", { value: k.id, selected: k.id === m.categoryId && (!m.keepsExistingCategory || m.categorySource !== "existing") }, k.name))); cats.set(m.key, sel);
+        const items = h("div", {}, m.items.slice(0, 4).map((i) => h("div", {}, `${i.name.length > 70 ? i.name.slice(0, 69) + "…" : i.name}${i.qty > 1 ? " x" + i.qty : ""} `, h("span", { class: "mute" }, usd(i.amount, 2)))), m.items.length > 4 ? h("div", { class: "mute" }, `+${m.items.length - 4} more`) : null);
+        return h("tr", {}, h("td", { "data-label": "Use" }, cb), h("td", { "data-label": "Bank date" }, m.bankDate), h("td", { class: "n", "data-label": "Amount" }, usd(m.amount, 2)), h("td", { "data-label": "Items" }, items), h("td", { "data-label": "Category" }, sel, m.mixed ? h("div", { class: "warn" }, "Mixed order") : null), h("td", { class: "mute", "data-label": "Why" }, m.categorySource));
+      });
+      apply.addEventListener("click", async () => {
+        const keys = [...picks].filter(([, cb]) => cb.checked).map(([k]) => k), overrides = {};
+        for (const k of keys) { const v = cats.get(k).value, m = r.matched.find((x) => x.key === k); if (v && v !== m.categoryId) overrides[k] = v; }
+        if (!keys.length) return;
+        if (!confirm(`Update ${keys.length} transaction(s) in Actual? This adds the item names to the notes and sets the category where you chose one.`)) return;
+        apply.disabled = true;
+        try { const res = await api("/api/amazon/apply", { body: { csv: text, keys, categoryOverrides: overrides, replaceCategory: replace.checked } }); msg.replaceChildren(h("div", {}, `Updated ${res.updated} transaction(s).` + (res.skipped.length ? ` ${res.skipped.length} skipped.` : ""))); } catch (e) { msg.replaceChildren(h("div", { class: "err" }, e.message)); } finally { apply.disabled = false; }
+      });
+      fill(out,
+        h("div", { class: "card mute" }, `${c.itemRows} item rows: ${c.matched} charge(s) matched to bank transactions, ${c.unmatchedOrders} with no bank match, ${c.alreadyApplied} already applied earlier${c.skipped ? `, ${c.skipped} cancelled or returned items ignored` : ""}. ${c.unmatchedBank} Amazon-looking bank transaction(s) have no order in this file.`),
+        r.matched.length ? h("div", {}, h("div", { class: "tablewrap stackwrap" }, h("table", { class: "stack" }, h("thead", {}, h("tr", {}, ["Use", "Bank date", "Amount", "Items", "Category", "Why"].map((x) => h("th", {}, x)))), h("tbody", {}, rows))),
+          h("label", { class: "check", style: "margin:8px 0" }, replace, "Also replace a category Actual already set when I picked a different one"), h("div", { class: "row", style: "margin:10px 0" }, apply), msg) : null,
+        r.unmatchedOrders.length ? [h("h2", {}, "In the orders file, no bank match"), table([{ label: "Date", key: "date" }, { label: "Amount", num: 1, render: (x) => usd(x.amount, 2) }, { label: "Items", key: "items" }, { label: "Reason", key: "reason" }], r.unmatchedOrders, { stack: r.unmatchedOrders.length < 30 })] : null,
+        r.unmatchedBank.length ? [h("h2", {}, "In the bank, no order in this file (request a newer export?)"), table([{ label: "Date", key: "date" }, { label: "Amount", num: 1, render: (x) => usd(x.amount, 2) }, { label: "Bank shows", key: "payee" }, { label: "Account", key: "account" }], r.unmatchedBank)] : null);
+    });
+  }
+  go.addEventListener("click", preview);
+  root.append(h("div", { class: "card" }, h("div", { class: "mute", style: "margin-bottom:8px" }, "Amazon has no personal API, so this uses your order history file. Request it from Amazon (Account > Request My Data > Your Orders; it arrives by email and can take a few days) and upload Retail.OrderHistory.1.csv from the zip. A browser extension that exports order history to CSV also works. Preview shows what would change; nothing is written until you press Apply."), h("div", { class: "row" }, file, go), area), out);
+}
+
 // ---------- Per-tab settings ----------
 // Each tab has its own "Settings" button that opens a form for the settings that tab uses.
 // fields: {path, label, type: number|text|list|accounts|kv, scale?, nullable?, hint?, tip?, kvLabels?}
@@ -686,7 +726,7 @@ function actualCheck() {
 
 // ---------- shell ----------
 const loaded = {};
-const inits = { loan: loanTab, budget: budgetTab, invest: investTab, assets: assetsTab, simplefin: simplefinTab, venmo: venmoTab };
+const inits = { loan: loanTab, budget: budgetTab, invest: investTab, assets: assetsTab, simplefin: simplefinTab, venmo: venmoTab, amazon: amazonTab };
 async function show(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("main section").forEach((s) => (s.hidden = s.id !== name));

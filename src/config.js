@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS = {
   },
   budget: { trailingMonths: 12, tolerancePct: 0.1, toleranceDollars: 10, excludeGroups: [], excludeCategories: [] },
   venmo: { dayWindow: 5, payeeRegex: "venmo", keywordCategories: {} },
+  amazon: { dayWindow: 7, payeeRegex: "amazon|amzn", keywordCategories: {} },
   simplefin: { startDaysBack: 90, cacheHours: 6 },
   snapshots: { enabled: true, time: "23:55" }, // end-of-day investment and asset snapshot, server local time
 };
@@ -45,6 +46,11 @@ export function validateSettings(s) {
   num(L.maxLtv, "loan.maxLtv", 0, 1); num(L.payoffBudgetPct, "loan.payoffBudgetPct", 0, 1); num(L.horizonMonths, "loan.horizonMonths", 6, 120); num(L.cushion, "loan.cushion", 0); num(L.roundTo, "loan.roundTo", 0);
   for (const k of ["homeValue", "mortgage", "otherLiens"]) num(L[k], `loan.${k}`, 0);
   for (const k of ["homeValueAccount", "mortgageAccount", "otherLiensAccount"]) if (L[k] != null && typeof L[k] !== "string") errs.push(`loan.${k} must be an account name or null`);
+  if (s.amazon) {
+    num(s.amazon.dayWindow, "amazon.dayWindow", 0, 60);
+    try { new RegExp(s.amazon.payeeRegex || ""); } catch { errs.push("amazon.payeeRegex is not a valid pattern"); }
+    for (const [k, v] of Object.entries(s.amazon.keywordCategories || {})) if (typeof v !== "string" || !k.trim()) errs.push("amazon.keywordCategories needs a word and a category name on every row");
+  }
   if (s.snapshots) { if (typeof s.snapshots.enabled !== "boolean") errs.push("snapshots.enabled must be true or false"); if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.snapshots.time || "")) errs.push("snapshots.time must look like 23:55"); }
   (s.projection?.bonuses || []).forEach((b, i) => { if (!/^\d{4}-\d{2}$/.test(b.month || "")) errs.push(`projection.bonuses[${i}].month must look like 2027-03`); if (b.repeat && !["once", "yearly"].includes(b.repeat)) errs.push(`projection.bonuses[${i}].repeat must be once or yearly`); num(+b.amount, `projection.bonuses[${i}].amount`, 0); });
   (s.projection?.purchases || []).forEach((p, i) => { if (!/^\d{4}-\d{2}$/.test(p.month || "")) errs.push(`projection.purchases[${i}].month must look like 2027-06`); num(+p.amount, `projection.purchases[${i}].amount`, 0); });

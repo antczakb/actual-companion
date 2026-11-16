@@ -181,3 +181,18 @@ test("settings validation: bonuses need a YYYY-MM month and a valid repeat", asy
   assert.ok(validateSettings({ projection: { bonuses: [{ month: "March", amount: 1 }] } }).some((e) => /bonuses\[0\]\.month/.test(e)));
   assert.ok(validateSettings({ projection: { bonuses: [{ month: "2027-03", amount: 1, repeat: "weekly" }] } }).some((e) => /repeat/.test(e)));
 });
+
+test("amazon: preview matches an order to a bank charge, apply writes notes and category, replaceCategory only when asked", async () => {
+  const { h, actual, settings } = make();
+  actual.d.txns.push({ id: "az1", accountId: "chk", date: "2026-10-10", amount: -53.5, categoryId: "groc", transferAcctId: null, payeeName: "Amazon", importedPayee: "AMZN Mktp US", notes: "" });
+  const s = settings.get(); s.amazon.keywordCategories = { filter: "Rent" }; settings.set(s);
+  const CSV = "Order ID,Order Date,Product Name,Unit Price,Unit Price Tax,Quantity,Total Owed,Ship Date,Order Status\n111-1,2026-10-08,Water Filter,50,3.5,1,53.50,2026-10-09,Closed\n";
+  const p = await h["POST /api/amazon/preview"]({ body: { csv: CSV } });
+  assert.equal(p.counts.matched, 1); assert.equal(p.matched[0].categoryId, "rent"); assert.equal(p.matched[0].keepsExistingCategory, true);
+  await h["POST /api/amazon/apply"]({ body: { csv: CSV, keys: ["111-1"] } });
+  assert.deepEqual(actual.updates.at(-1), { id: "az1", notes: "Amazon: Water Filter [amzn:111-1]" }); // existing category kept by default
+  await h["POST /api/amazon/apply"]({ body: { csv: CSV, keys: ["111-1"], replaceCategory: true } });
+  assert.equal(actual.updates.at(-1).category, "rent");
+  await assert.rejects(h["POST /api/amazon/apply"]({ body: { csv: CSV, keys: [] } }), /Nothing selected/);
+  await assert.rejects(h["POST /api/amazon/preview"]({ body: { csv: "garbage" } }), /Amazon order history/);
+});

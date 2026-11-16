@@ -15,6 +15,8 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), "demo-"));
 const now = new Date();
 const ym = (back) => { const t = now.getFullYear() * 12 + now.getMonth() - back; return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`; };
 const txns = [];
+const dago = (k) => new Date(Date.now() - k * 864e5).toISOString().slice(0, 10);
+[[3, -53.5, "Amazon"], [9, -42.8, "Amazon"], [14, -27.99, "Amazon"], [20, -18.2, "Amazon"]].forEach(([k, amt, nm], i) => txns.push({ id: `az${i}`, accountId: "chk", date: dago(k), amount: amt, categoryId: i === 1 ? "groc" : null, transferAcctId: null, payeeName: nm, importedPayee: "AMZN Mktp US*" + i, notes: "" }));
 for (let b = 1; b <= 14; b++) {
   const m = ym(b);
   txns.push({ id: `p${b}`, accountId: "chk", date: `${m}-01`, amount: 6400, categoryId: "pay", transferAcctId: null, payeeName: "Employer", importedPayee: "", notes: "" });
@@ -31,6 +33,7 @@ const actual = new FakeActual({
 });
 const settings = new SettingsStore(path.join(dir, "settings.json"));
 const s = settings.get(); 
+s.amazon.keywordCategories = { filter: "Mortgage", "dog food": "Groceries", gift: "Gifts" };
 s.projection.bonuses = [{ name: "Annual bonus", month: ym(-2), amount: 12000, repeat: "yearly" }];
 s.projection.purchases = [{ month: ym(-5), amount: 85000, name: "Kitchen remodel" }, { month: ym(-14), amount: 30000, name: "Car" }];
 settings.set(s);
