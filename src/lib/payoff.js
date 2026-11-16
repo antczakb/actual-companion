@@ -41,6 +41,18 @@ function lowestHeadroom(rows, draw, plan) {
   return Number.isFinite(low) ? low : null;
 }
 
+// Cash with the loan under a payoff plan, one value per projection row (before the draw it is just the row's own cash).
+function cashSeries(rows, draw, plan) {
+  if (!rows || draw == null) return null;
+  let cum = 0;
+  return rows.map((r) => {
+    if (r.h < draw) return Math.round(r.cashWithLoan);
+    const k = r.h - draw;
+    if (k >= 1) cum += (k <= plan.months ? plan.payments[k - 1] : 0) - (r.loanPayment || 0);
+    return Math.round(r.cashWithLoan - cum);
+  });
+}
+
 export function payoffPlans({ loan, product, monthlySurplus = 0, budgetPct = 0.5, targetYears = [2, 3, 5, 7, 10, 15], rows = null, draw = null, drawLabel = null }) {
   if (!(loan > 0)) return { plans: [], bestKey: null, budgetCap: 0 };
   const cap = Math.max(0, budgetPct * monthlySurplus);
@@ -81,11 +93,13 @@ export function payoffPlans({ loan, product, monthlySurplus = 0, budgetPct = 0.5
       key: p.key, name: p.name, payment, months: p.months, paidOffBy: drawLabel ? addMonths(drawLabel, p.months) : null,
       totalInterest: p.interest, interestSaved: min.interest - p.interest, fees, totalCost: p.interest + fees,
       pctOfSurplus: monthlySurplus > 0 ? payment / monthlySurplus : null, lowestHeadroom: headroom, floorOk,
-      withinBudget: floorOk && payment <= cap + 0.5, balances: p.balances,
+      withinBudget: floorOk && payment <= cap + 0.5, balances: p.balances, cash: cashSeries(rows, draw, p),
     };
   });
   const ok = plans.filter((p) => p.withinBudget);
   const best = ok.length ? ok.reduce((a, b) => (b.totalInterest < a.totalInterest - 0.5 || (Math.abs(b.totalInterest - a.totalInterest) <= 0.5 && b.months < a.months) ? b : a)) : null;
+  const feasible = plans.filter((p) => p.withinBudget && Number.isFinite(p.months));
+  const fastest = feasible.length ? feasible.reduce((a, b) => (b.months < a.months ? b : a)) : null;
   for (const p of plans) if (p.key !== "minimum" && (!best || p.key !== best.key)) delete p.balances; // keep curves for the chart only
-  return { plans, bestKey: best?.key || null, budgetCap: cap };
+  return { plans, bestKey: best?.key || null, fastestKey: fastest?.key || null, budgetCap: cap };
 }

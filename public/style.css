@@ -155,3 +155,8 @@ svg.chart.interactive:focus-visible { outline:2px solid var(--accent, #1f5fbf); 
 @media (prefers-color-scheme: dark) { .up { color:#4ac26b; } .down { color:#ff7b72; } }
 tr.pick { cursor:pointer; } tr.pick.sel td { background:rgba(31,95,191,.14); }
 @media (max-width:720px) { .hstats { grid-template-columns:1fr; } svg.chart.interactive { min-height:220px; } }
+
+.chartopts { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; margin:8px 0; }
+label.chk { display:inline-flex !important; flex-direction:row !important; gap:6px; align-items:center; cursor:pointer; font-size:.9rem; }
+label.chk input { width:auto; margin:0; }
+label.chk i { width:14px; height:3px; border-radius:2px; display:inline-block; }

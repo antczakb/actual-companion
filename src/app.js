@@ -55,10 +55,17 @@ export function createHandlers(d) {
       if (avg.monthsUsed < 3) warnings.push(`Only ${avg.monthsUsed} month(s) of transactions found to estimate income and spending; set overrides in Settings or wait for more data.`);
       if (!home.value) warnings.push("Home value is 0, so secured products show no equity room. Choose an Actual account or enter a value in step 2.");
       if (!P.purchases.length) warnings.push("No planned purchases entered in step 1; the projection only shows your baseline cash flow.");
+      const withFastest = (row, prod) => {
+        const res = sizeLoan({ ...base, product: prod, loanOverride: num(query.loan) });
+        const pp = payoffPlans({ loan: res.summary.usedLoan, product: prod, monthlySurplus: income - expenses - investing, budgetPct: L.payoffBudgetPct, rows: res.rows, draw: res.summary.drawIndex, drawLabel: res.summary.drawLabel });
+        const min = pp.plans.find((x) => x.key === "minimum"), fast = pp.plans.find((x) => x.key === pp.fastestKey);
+        const pick = (x) => x && { name: x.name, months: x.months, payment: x.payment, paidOffBy: x.paidOffBy, totalInterest: x.totalInterest, totalCost: x.totalCost, interestSaved: x.interestSaved };
+        return { ...row, fullTerm: pick(min) || null, fastest: pick(fast) || null };
+      };
       return {
         resolved: { homeValue: home, mortgage: mort, otherLiens: liens },
         assumptions: { cashToday: cash0, cashAccounts: cashAccts.map((a) => a.name), monthlyIncome: income, monthlyExpenses: expenses, monthlyInvesting: investing, monthlySurplus: income - expenses - investing, monthsOfHistory: avg.monthsUsed },
-        payoff, summary: result.summary, rows: result.rows, comparison: compareProducts(base, L.products), warnings, products: L.products.map((p) => p.name),
+        payoff, summary: result.summary, rows: result.rows, comparison: compareProducts(base, L.products).map((c, i) => withFastest(c, L.products[i])), warnings, products: L.products.map((p) => p.name),
       };
   }
 

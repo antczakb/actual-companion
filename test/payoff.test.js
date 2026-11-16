@@ -61,3 +61,22 @@ test("cash floor: extra payments that push cash under the floor are not 'within 
 });
 
 test("no loan, no plans", () => { assert.deepEqual(payoffPlans({ loan: 0, product, monthlySurplus: 1000 }).plans, []); });
+
+test("payoff: fastestKey is the shortest plan inside budget, and each plan carries a cash series aligned to the rows", async () => {
+  const { sizeLoan } = await import("../src/lib/loan.js");
+  const { buildProjection } = await import("../src/lib/flows.js");
+  const months = buildProjection({ startMonth: "2026-12", horizon: 36, cash0: 20000, income: 9000, expenses: 5500, investing: 500, purchases: [{ month: "2027-03", amount: 60000 }], reserveMonths: 3 });
+  const product = { name: "HELOC", rate: 0.08, termYears: 20, ioYears: 10, feePct: 0, fixedFee: 0, secured: true };
+  const res = sizeLoan({ months, product, protectReserve: true, cushion: 0, roundTo: 1000, maxLtv: 0.85, homeValue: 600000, mortgage: 200000, otherLiens: 0, monthlyIncome: 9000, monthlySurplus: 3000 });
+  const po = payoffPlans({ loan: res.summary.usedLoan, product, monthlySurplus: 3000, budgetPct: 0.5, rows: res.rows, draw: res.summary.drawIndex, drawLabel: res.summary.drawLabel });
+  assert.ok(po.fastestKey, "a fastest plan exists");
+  const fast = po.plans.find((p) => p.key === po.fastestKey);
+  assert.ok(fast.withinBudget);
+  for (const p of po.plans.filter((x) => x.withinBudget)) assert.ok(fast.months <= p.months);
+  for (const p of po.plans) assert.equal(p.cash.length, res.rows.length);
+  const min = po.plans.find((p) => p.key === "minimum");
+  assert.deepEqual(min.cash, res.rows.map((r) => Math.round(r.cashWithLoan))); // minimum plan == the loan's own cash line
+  // paying off faster costs more cash in the month after the draw
+  const k = res.summary.drawIndex + 1;
+  assert.ok(fast.cash[k] <= min.cash[k]);
+});
