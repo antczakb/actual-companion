@@ -9,13 +9,14 @@ import { getSimpleFIN, toTables } from "./lib/simplefin.js";
 import { diagnoseUrl } from "./lib/diagnose.js";
 import { addMonths, currentMonth, lastDayOf } from "./lib/dates.js";
 import { ASSET_TYPES } from "./lib/assets.js";
+import { extractValue, parseWatchId } from "./adapters/changedetection.js";
 import { localDate } from "./lib/schedule.js";
 
 const httpErr = (status, message) => Object.assign(new Error(message), { status });
 const num = (v) => (v === undefined || v === "" || v === null ? null : Number.isFinite(+v) ? +v : null);
 
 export function createHandlers(d) {
-  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, snapshotState, now = () => new Date() } = d;
+  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, snapshotState, changedetection, now = () => new Date() } = d;
   const month0 = () => currentMonth(now());
   const today = () => localDate(now());
 
@@ -190,8 +191,20 @@ export function createHandlers(d) {
       return { updated: done.length, skipped: [...keys].filter((k) => !done.includes(k)) };
     },
 
-    "GET /api/assets": async () => ({ types: ASSET_TYPES, ...assets.view(today()) }),
-    "POST /api/assets": async ({ body }) => assets.upsert(body || {}),
+    "GET /api/assets": async () => ({ types: ASSET_TYPES, changedetection: !!changedetection?.configured(), ...assets.view(today()) }),
+    "POST /api/assets": async ({ body }) => {
+      const b = body || {};
+      if (b.watchId && !parseWatchId(b.watchId)) throw httpErr(400, "That does not look like a changedetection.io watch ID. Paste the UUID or the watch's edit URL.");
+      return assets.upsert({ ...b, watchId: b.watchId ? parseWatchId(b.watchId) : null });
+    },
+    "POST /api/assets/fetch": async ({ body }) => {
+      const a = assets.list().find((x) => x.id === body?.id);
+      if (!a) throw httpErr(404, "Asset not found.");
+      if (!a.watchId) throw httpErr(400, "This asset has no changedetection.io watch.");
+      const r = await fetchWatchedValue(a);
+      if (!r.ok) throw httpErr(400, r.message);
+      return r;
+    },
     "POST /api/assets/value": async ({ body }) => { assets.setValue(body?.id, { date: body?.date || today(), value: body?.value, note: body?.note }); return { ok: true }; },
     "POST /api/assets/value/delete": async ({ body }) => { assets.removeValue(body?.id, body?.date); return { ok: true }; },
     "POST /api/assets/delete": async ({ body }) => { if (!assets.remove(body?.id)) throw httpErr(404, "Asset not found."); return { ok: true }; },
@@ -200,6 +213,22 @@ export function createHandlers(d) {
     "POST /api/snapshot/run": async () => runSnapshot(),
   };
 
+  // Read a value from the asset's changedetection.io watch. A reading that jumps more than maxJumpPct from the last value is
+  // NOT recorded (a scraper that grabbed the wrong number should not rewrite your history); it is reported for you to check.
+  async function fetchWatchedValue(a) {
+    const date = today(), maxJump = 0.25, stamp = (ok, message) => { assets.setFetchStatus(a.id, { at: now().toISOString(), ok, message }); return { ok, message }; };
+    try {
+      if (!changedetection?.configured()) return stamp(false, "changedetection.io is not configured on the server.");
+      const text = await changedetection.latestText(a.watchId), v = extractValue(text, a.valueRegex);
+      if (v == null) return stamp(false, "No dollar amount found in the latest snapshot. Check the watch's selector or set a value pattern.");
+      const last = a.values.at(-1);
+      if (last && last.value > 0 && Math.abs(v - last.value) / last.value > maxJump)
+        return stamp(false, `Read ${v.toLocaleString("en-US")}, which differs from the last value (${last.value.toLocaleString("en-US")}) by more than ${maxJump * 100}%, so it was not saved. If it is right, enter it by hand.`);
+      assets.setValue(a.id, { date, value: v, note: "From changedetection.io", source: "changedetection" });
+      return { ...stamp(true, `read ${v.toLocaleString("en-US")}`), recorded: true, value: v, date };
+    } catch (e) { return stamp(false, e.message); }
+  }
+
   // End-of-day snapshot: investment balances from SnapTrade, plus today's balance for assets linked to an Actual account.
   async function runSnapshot() {
     const date = today(), out = { date, investments: 0, assets: 0, notes: [] };
@@ -207,6 +236,7 @@ export function createHandlers(d) {
       try { const accts = await snaptrade.fetchAll(); if (accts.length) { store.record(date, accts); out.investments = accts.length; } else out.notes.push("SnapTrade returned no accounts."); }
       catch (e) { out.notes.push(`SnapTrade: ${e.message}`); }
     } else out.notes.push("SnapTrade not configured; investments skipped.");
+    for (const a of assets.list().filter((x) => x.watchId)) { const r = await fetchWatchedValue(a); out.notes.push(`${a.name}: ${r.message}`); if (r.ok && r.recorded) out.assets++; }
     const linked = assets.list().filter((a) => a.actualAccount);
     if (linked.length) {
       try {

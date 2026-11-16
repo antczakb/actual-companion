@@ -64,3 +64,38 @@ test("runSnapshot records investments and values of Actual-linked assets", async
   assert.equal(assets.view("2026-11-16").assets.find((a) => a.id === home.id).current.value, 640000);
   assert.equal(assets.view("2026-11-16").assets.find((a) => a.id === car.id).current, null);
 });
+
+import { extractValue, parseWatchId, ChangeDetectionAdapter } from "../src/adapters/changedetection.js";
+
+test("changedetection: value extraction and watch id parsing", () => {
+  assert.equal(extractValue("Zestimate\n$641,250\nRent $2,900", null), 641250);
+  assert.equal(extractValue("Value: 29,500 USD", String.raw`Value:\s*([0-9,]+)`), 29500);
+  assert.equal(extractValue("nothing here", null), null);
+  assert.throws(() => extractValue("x", "("), /regular expression/);
+  assert.equal(parseWatchId("http://cd:5000/edit/4F1C2A9E-1234-4abc-8def-0123456789ab?x=1"), "4f1c2a9e-1234-4abc-8def-0123456789ab");
+  assert.equal(parseWatchId("not an id"), null);
+});
+
+test("changedetection: adapter errors are readable", async () => {
+  const mk = (status, body = "") => new ChangeDetectionAdapter({ baseUrl: "http://cd:5000/", apiKey: "k", fetchImpl: async (u, o) => { assert.equal(o.headers["x-api-key"], "k"); assert.match(u, /^http:\/\/cd:5000\/api\/v1\/watch\/abc\/history\/latest$/); return { status, ok: status < 300, text: async () => body }; } });
+  assert.equal(await mk(200, "$5").latestText("abc"), "$5");
+  await assert.rejects(mk(403).latestText("abc"), /rejected the API key/);
+  await assert.rejects(mk(404).latestText("abc"), /no snapshot/);
+  await assert.rejects(new ChangeDetectionAdapter({}).latestText("abc"), /not configured/);
+});
+
+test("fetching a watched value: records it, holds back a wild jump, reports a missing number", async () => {
+  const dir = tmp(), assets = new AssetStore(path.join(dir, "a.json")); let text = "Home value $641,000";
+  const a = assets.upsert({ name: "House", type: "home", watchId: "4f1c2a9e-1234-4abc-8def-0123456789ab" });
+  assets.setValue(a.id, { date: "2026-10-01", value: 630000 });
+  const h = createHandlers({ actual: {}, snaptrade: null, store: {}, settings: new SettingsStore(path.join(dir, "s.json")), scenarios: null, assets, snapshotState: null, simplefin: {},
+    changedetection: { configured: () => true, latestText: async () => text }, now: () => new Date(2026, 10, 16, 23, 55) });
+  assert.equal((await h["POST /api/assets/fetch"]({ body: { id: a.id } })).value, 641000);
+  assert.equal(assets.view("2026-11-16").assets[0].current.source, "changedetection");
+  text = "Home value $64,100"; // scraper grabbed a wrong number
+  await assert.rejects(h["POST /api/assets/fetch"]({ body: { id: a.id } }), /not saved/);
+  assert.equal(assets.view("2026-11-16").assets[0].current.value, 641000);
+  assert.equal(assets.view("2026-11-16").assets[0].lastFetch.ok, false);
+  text = "no numbers"; await assert.rejects(h["POST /api/assets/fetch"]({ body: { id: a.id } }), /No dollar amount/);
+  await assert.rejects(h["POST /api/assets"]({ body: { name: "X", type: "home", watchId: "nope" } }), /watch ID/);
+});

@@ -668,21 +668,23 @@ function assetsTab() {
   const root = $("assets"), out = h("div"), today = new Date().toISOString().slice(0, 10);
   const field = (label, el) => h("label", { class: "setfield" }, h("span", { class: "lbl" }, label), el);
   const mk = (type, val, extra = {}) => h("input", { type, class: "in", step: "any", value: val ?? "", ...extra });
-  let accounts = [];
+  let accounts = [], cdOn = false;
   const acctSelect = (cur) => { const s = h("select", {}, h("option", { value: "" }, "None, I'll enter values by hand"), accounts.map((a) => h("option", { value: a.name }, `${a.name} (${usd(a.balance)})`))); s.value = cur || ""; return s; };
   const guard = (box, fn) => async () => { try { await fn(); } catch (e) { box.replaceChildren(h("div", { class: "err" }, e.message)); } };
 
   function assetForm(a, done) {
     const name = mk("text", a?.name, { placeholder: "e.g. Primary home" }), type = h("select", {}, Object.entries(ASSET_LABEL).map(([k, v]) => h("option", { value: k }, v))); type.value = a?.type || "home";
-    const link = acctSelect(a?.actualAccount), msg = h("div"), val = mk("number", "", { min: 0, inputmode: "decimal", placeholder: "Current value" });
+    const link = acctSelect(a?.actualAccount), watch = mk("text", a?.watchId, { placeholder: "Paste the watch ID or its edit URL" }), rx = mk("text", a?.valueRegex, { placeholder: "Optional, e.g. Zestimate[^$]*\\$([0-9,]+)" }), msg = h("div"), val = mk("number", "", { min: 0, inputmode: "decimal", placeholder: "Current value" });
     const save = h("button", { class: "act" }, a ? "Save changes" : "Add asset");
     save.addEventListener("click", guard(msg, async () => {
-      const rec = await api("/api/assets", { body: { id: a?.id, name: name.value, type: type.value, actualAccount: link.value || null } });
+      const rec = await api("/api/assets", { body: { id: a?.id, name: name.value, type: type.value, actualAccount: link.value || null, watchId: watch.value.trim() || null, valueRegex: rx.value.trim() } });
       if (!a && val.value !== "") await api("/api/assets/value", { body: { id: rec.id, date: today, value: +val.value, note: "Starting value" } });
       done();
     }));
     return h("div", { class: "card" }, h("div", { class: "row fields" }, field("Name", name), field("Type", type), field("Take the value from an Actual account", link), a ? null : field("Value today ($)", val)),
-      h("small", { class: "mute" }, "Linking to an Actual account records that account's balance in each nightly snapshot, so the value updates by itself. Without a link, type in a new value whenever you check Zillow, KBB or a dealer quote."),
+      h("div", { class: "row fields" }, field("changedetection.io watch (optional)", watch), field("Value pattern (optional)", rx)),
+      h("small", { class: "mute" }, cdOn ? "Each night the app reads the watch's latest snapshot and takes the first dollar amount in it, or the first group of your pattern. A reading more than 25% away from the last value is held back for you to check." : "changedetection.io is not connected. Set CHANGEDETECTION_URL and CHANGEDETECTION_API_KEY on the server (see README) to use a watch."),
+      h("small", { class: "mute", style: "display:block;margin-top:6px" }, "Linking to an Actual account records that account's balance in each nightly snapshot, so the value updates by itself. Without a link, type in a new value whenever you check Zillow, KBB or a dealer quote."),
       h("div", { class: "row actions" }, save, h("button", { class: "alt", onclick: done }, "Cancel")), msg);
   }
 
@@ -692,19 +694,23 @@ function assetsTab() {
     const saveV = h("button", { class: "act" }, "Save value");
     saveV.addEventListener("click", guard(msg, async () => { await api("/api/assets/value", { body: { id: a.id, date: date.value, value: val.value === "" ? null : +val.value, note: note.value } }); await load(); }));
     const delta = (v, label) => (v == null ? null : h("span", { class: v >= 0 ? "up" : "down" }, `${v >= 0 ? "+" : "-"}${usd(Math.abs(v))} ${label}`));
-    const hist = h("details", {}, h("summary", {}, `History (${a.values.length})`), table([{ label: "Date", key: "date" }, { label: "Value", num: 1, render: (x) => usd(x.value) }, { label: "Source", render: (x) => (x.source === "actual" ? "Actual account" : "Entered by hand") }, { label: "Note", key: "note" },
+    const hist = h("details", {}, h("summary", {}, `History (${a.values.length})`), table([{ label: "Date", key: "date" }, { label: "Value", num: 1, render: (x) => usd(x.value) }, { label: "Source", render: (x) => (x.source === "actual" ? "Actual account" : x.source === "changedetection" ? "changedetection.io" : "Entered by hand") }, { label: "Note", key: "note" },
       { label: "", render: (x) => h("button", { class: "alt", onclick: guard(msg, async () => { if (confirm(`Delete the ${x.date} entry?`)) { await api("/api/assets/value/delete", { body: { id: a.id, date: x.date } }); await load(); } }) }, "Delete") }], a.values.slice().reverse(), { stack: a.values.length < 30 }));
+    const fetchB = a.watchId ? h("button", { class: "alt" }, "Fetch now") : null;
+    fetchB?.addEventListener("click", guard(msg, async () => { fetchB.disabled = true; try { const r = await api("/api/assets/fetch", { body: { id: a.id } }); await load(); } finally { fetchB.disabled = false; } }));
+    const lf = a.lastFetch ? h("div", { class: a.lastFetch.ok ? "mute" : "warn" }, `changedetection.io, ${new Date(a.lastFetch.at).toLocaleString()}: ${a.lastFetch.message}`) : null;
     const edit = h("button", { class: "alt", onclick: () => card.replaceWith(h("div", {}, assetForm(a, () => load()))) }, "Edit"), del = h("button", { class: "alt", onclick: guard(msg, async () => { if (confirm(`Remove ${a.name} and its history?`)) { await api("/api/assets/delete", { body: { id: a.id } }); await load(); } }) }, "Remove");
     const card = h("div", { class: "card asset" },
-      h("div", { class: "row" }, h("b", { class: "hval" }, a.name), h("span", { class: "pill" }, ASSET_LABEL[a.type] || a.type), a.actualAccount ? h("span", { class: "mute" }, `from Actual: ${a.actualAccount}`) : null, h("span", { style: "flex:1" }), edit, del),
+      h("div", { class: "row" }, h("b", { class: "hval" }, a.name), h("span", { class: "pill" }, ASSET_LABEL[a.type] || a.type), a.actualAccount ? h("span", { class: "mute" }, `from Actual: ${a.actualAccount}`) : null, h("span", { style: "flex:1" }), fetchB, edit, del),
       cur ? h("div", { class: "row" }, h("b", { style: "font-size:1.5rem" }, usd(cur.value)), h("span", { class: "mute" }, `as of ${cur.date}${a.daysOld ? ` (${a.daysOld} days ago)` : ""}`), delta(a.changeSincePrevious, "since previous"), delta(a.changeSinceFirst, `since ${a.firstDate}`)) : h("div", { class: "mute" }, "No value yet. Enter one below."),
+      lf,
       stale ? h("div", { class: "warn" }, `This value is ${a.daysOld} days old. Update it so the history stays meaningful.`) : null,
       h("div", { class: "row fields" }, field("New value ($)", val), field("As of", date), field("Note", note)), h("div", { class: "row actions" }, saveV), msg, a.values.length ? hist : null);
     return card;
   }
 
   async function load() {
-    const [r, accts] = await Promise.all([api("/api/assets"), api("/api/accounts").catch(() => [])]); accounts = accts;
+    const [r, accts] = await Promise.all([api("/api/assets"), api("/api/accounts").catch(() => [])]); accounts = accts; cdOn = r.changedetection;
     const total = r.assets.reduce((s, a) => s + (a.current ? a.current.value : 0), 0);
     const addBox = h("div"), addBtn = h("button", { class: "act", onclick: () => fill(addBox, assetForm(null, () => load())) }, "+ Add asset");
     fill(out,

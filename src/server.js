@@ -8,6 +8,7 @@ import { createHandlers } from "./app.js";
 import { SettingsStore } from "./config.js";
 import { SnapshotStore } from "./lib/investments.js";
 import { ScenarioStore } from "./lib/scenarios.js";
+import { ChangeDetectionAdapter } from "./adapters/changedetection.js";
 import { AssetStore } from "./lib/assets.js";
 import { SnapshotState, createSnapshotJob } from "./lib/schedule.js";
 import { ActualAdapter } from "./adapters/actual.js";
@@ -68,6 +69,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     scenarios: new ScenarioStore(path.join(dataDir, "scenarios.json")),
     assets: new AssetStore(path.join(dataDir, "assets.json")),
     snapshotState,
+    changedetection: new ChangeDetectionAdapter({ baseUrl: E.CHANGEDETECTION_URL, apiKey: E.CHANGEDETECTION_API_KEY }),
     simplefin: { accessUrl: E.SIMPLEFIN_ACCESS_URL, cachePath: path.join(dataDir, "simplefin-cache.json") },
   });
   const port = +E.PORT || 3000;

@@ -125,3 +125,12 @@ Under the loan details, the app lists ways to pay the loan off early: fixed paym
 ## Amazon order detail (v0.1.15)
 
 Amazon has no personal API. Request your data from Amazon (Account > Request My Data > Your Orders), unzip, and upload `Retail.OrderHistory.1.csv` in the Amazon tab. Each order (or each shipment, since Amazon bills per shipment) is matched to a bank charge by exact amount within the date window. Applying adds the item names to the transaction notes with an `[amzn:ORDER]` marker (so a re-run skips it) and sets a category from your item keywords. Columns are found by name; if a file is not recognized the error lists the column names it saw.
+
+## Home and vehicle values from changedetection.io (v0.1.16)
+
+1. In changedetection.io, add a watch for the page that shows the value (your county assessor page, a Redfin or Zillow estimate page, a KBB or dealer value page). If the number is rendered by JavaScript, set the watch's fetch method to a browser (Chrome/Playwright). Use a CSS selector or "Extract text" filter so the snapshot contains just the value; check it in the watch's Preview tab.
+2. In changedetection.io Settings > API, copy the API key. On the companion server add to `/etc/actual-companion.env`: `CHANGEDETECTION_URL=http://<host>:5000` and `CHANGEDETECTION_API_KEY=...`, then `systemctl restart actual-companion`.
+3. In the Assets tab, edit the asset and paste the watch's UUID or edit URL. Each night the app reads the latest snapshot and records the first dollar amount in it (or the first group of your optional pattern). "Fetch now" tests it immediately.
+4. A reading more than 25% away from the last value is not saved; it shows as a warning on the asset so a mis-scrape cannot rewrite your history.
+
+Note: Zillow, Redfin and KBB often block automated visitors and their terms restrict scraping, so a watch on those sites may fail or return a challenge page. A county assessor page is the most reliable for a house; a dealer or marketplace listing for a similar vehicle works for cars.
