@@ -160,3 +160,4 @@ tr.pick { cursor:pointer; } tr.pick.sel td { background:rgba(31,95,191,.14); }
 label.chk { display:inline-flex !important; flex-direction:row !important; gap:6px; align-items:center; cursor:pointer; font-size:.9rem; }
 label.chk input { width:auto; margin:0; }
 label.chk i { width:14px; height:3px; border-radius:2px; display:inline-block; }
+.stackcell { display:flex; flex-direction:column; gap:4px; min-width:150px; } .stackcell > * { width:100%; box-sizing:border-box; }

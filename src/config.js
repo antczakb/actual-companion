@@ -17,6 +17,8 @@ export const DEFAULT_SETTINGS = {
     incomeGrowthPct: 0, expenseInflationPct: 0, incomeOverride: null, expensesOverride: null, investingOverride: null,
     purchases: [],
     bonuses: [],
+    existingLoans: [], // {name, balanceAccount, balance, rate, payment, payoffMonth, payoffAmount|null, paymentInSpending}
+    jobLoss: { enabled: false, startMonth: "", months: 6, incomePct: 0, severance: 0, expenseCutPct: 10, pauseInvesting: true },
   },
   budget: { trailingMonths: 12, tolerancePct: 0.1, toleranceDollars: 10, excludeGroups: [], excludeCategories: [] },
   venmo: { dayWindow: 5, payeeRegex: "venmo", keywordCategories: {} },
@@ -52,6 +54,18 @@ export function validateSettings(s) {
     for (const [k, v] of Object.entries(s.amazon.keywordCategories || {})) if (typeof v !== "string" || !k.trim()) errs.push("amazon.keywordCategories needs a word and a category name on every row");
   }
   if (s.snapshots) { if (typeof s.snapshots.enabled !== "boolean") errs.push("snapshots.enabled must be true or false"); if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.snapshots.time || "")) errs.push("snapshots.time must look like 23:55"); }
+  (s.projection?.existingLoans || []).forEach((x, i) => {
+    const w = `projection.existingLoans[${i}]`;
+    if (!String(x.name || "").trim()) errs.push(`${w}.name is required`);
+    if (!/^\d{4}-\d{2}$/.test(x.payoffMonth || "")) errs.push(`${w}.payoffMonth must look like 2027-06`);
+    num(+x.balance, `${w}.balance`, 0); num(+x.rate, `${w}.rate`, 0, 1); num(+x.payment, `${w}.payment`, 0);
+    if (x.payoffAmount != null) num(+x.payoffAmount, `${w}.payoffAmount`, 0);
+  });
+  if (s.projection?.jobLoss) {
+    const J = s.projection.jobLoss;
+    if (J.enabled && !/^\d{4}-\d{2}$/.test(J.startMonth || "")) errs.push("projection.jobLoss.startMonth must look like 2027-03");
+    num(+J.months, "projection.jobLoss.months", 0, 120); num(+J.incomePct, "projection.jobLoss.incomePct", 0, 1); num(+J.severance, "projection.jobLoss.severance", 0); num(+J.expenseCutPct, "projection.jobLoss.expenseCutPct", 0, 100);
+  }
   (s.projection?.bonuses || []).forEach((b, i) => { if (!/^\d{4}-\d{2}$/.test(b.month || "")) errs.push(`projection.bonuses[${i}].month must look like 2027-03`); if (b.repeat && !["once", "yearly"].includes(b.repeat)) errs.push(`projection.bonuses[${i}].repeat must be once or yearly`); num(+b.amount, `projection.bonuses[${i}].amount`, 0); });
   (s.projection?.purchases || []).forEach((p, i) => { if (!/^\d{4}-\d{2}$/.test(p.month || "")) errs.push(`projection.purchases[${i}].month must look like 2027-06`); num(+p.amount, `projection.purchases[${i}].amount`, 0); });
   const P = s.projection || {};

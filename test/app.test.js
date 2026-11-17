@@ -196,3 +196,23 @@ test("amazon: preview matches an order to a bank charge, apply writes notes and 
   await assert.rejects(h["POST /api/amazon/apply"]({ body: { csv: CSV, keys: [] } }), /Nothing selected/);
   await assert.rejects(h["POST /api/amazon/preview"]({ body: { csv: "garbage" } }), /Amazon order history/);
 });
+
+test("loan: existing-loan payoff and job-loss stress test come back from the API", async () => {
+  const { h, settings } = make();
+  const s = settings.get();
+  s.loan.homeValue = 800000; s.loan.mortgage = 300000;
+  s.projection.purchases = [{ month: "2027-03", amount: 90000, name: "Kitchen" }];
+  s.projection.existingLoans = [{ name: "Truck loan", balance: 20000, rate: 0.06, payment: 400, payoffMonth: "2027-06", payoffAmount: null, paymentInSpending: true }];
+  s.projection.jobLoss = { enabled: true, startMonth: "2027-04", months: 6, incomePct: 0.2, severance: 0, expenseCutPct: 10, pauseInvesting: true };
+  settings.set(s);
+  const r = await h["GET /api/loan"]({ query: {} });
+  assert.equal(r.existing.length, 1); assert.equal(r.existing[0].balanceSource, "custom"); assert.ok(r.existing[0].payoffAmount > 10000 && r.existing[0].payoffAmount < 20000); assert.equal(r.existing[0].freedPayment, 400);
+  assert.ok(r.rows.find((x) => x.label === "2027-06").payoffs > 0);
+  assert.ok(r.stress && r.stress.noLoan && typeof r.stress.noLoan.lowestCash === "number");
+  assert.ok(r.stress.noLoan.lowestCash <= (r.rows.reduce((a, x) => Math.min(a, x.cash), Infinity)), "job loss is never better than the base case");
+  assert.equal(r.stress.rows.length, r.rows.length);
+  s.projection.jobLoss.enabled = false; settings.set(s);
+  assert.equal((await h["GET /api/loan"]({ query: {} })).stress, null);
+  s.projection.existingLoans[0].payoffMonth = "soon";
+  assert.throws(() => settings.set(s), /payoffMonth/);
+});

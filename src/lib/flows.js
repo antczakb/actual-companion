@@ -40,21 +40,28 @@ export function trailingAverages(flows, endMonthExclusive, n) {
 
 // opts: {startMonth, horizon, cash0, income, expenses, investing, incomeGrowthPct, expenseInflationPct,
 //        reserveMonths, reserveFixed, purchases:[{month, amount, name}],
+//        payoffs:[{month, amount, freed, name}]  (pay off an existing loan: cash out in that month, `freed` per month back from then on)
+//        jobLoss:{startMonth, months (0 = rest of projection), incomePct (0-1 of income still coming in), severance, expenseCutPct (0-100), pauseInvesting}
 //        bonuses:[{month, amount, name, repeat:"once"|"yearly"}]  (extra cash in; "yearly" repeats every 12 months from that month)}
-const monthsBetween = (a, b) => { const [ay, am] = String(a).split("-").map(Number), [by, bm] = String(b).split("-").map(Number); return (by - ay) * 12 + (bm - am); };
+export const monthsBetween = (a, b) => { const [ay, am] = String(a).split("-").map(Number), [by, bm] = String(b).split("-").map(Number); return (by - ay) * 12 + (bm - am); };
 export function buildProjection(o) {
   const months = [];
   let cash = o.cash0;
   for (let i = 0; i < o.horizon; i++) {
     const label = addMonths(o.startMonth, i);
     const yrs = Math.floor(i / 12); // step up once a year
-    const inc = o.income * Math.pow(1 + (o.incomeGrowthPct || 0) / 100, yrs);
-    const exp = o.expenses * Math.pow(1 + (o.expenseInflationPct || 0) / 100, yrs);
+    let inc = o.income * Math.pow(1 + (o.incomeGrowthPct || 0) / 100, yrs);
+    let exp = o.expenses * Math.pow(1 + (o.expenseInflationPct || 0) / 100, yrs);
+    let invest = o.investing || 0, severance = 0;
+    const J = o.jobLoss, jd = J ? monthsBetween(J.startMonth, label) : -1, jobLost = !!J && jd >= 0 && (!J.months || jd < J.months);
+    if (jobLost) { inc *= Math.min(1, Math.max(0, J.incomePct || 0)); exp *= 1 - Math.min(100, Math.max(0, J.expenseCutPct || 0)) / 100; if (J.pauseInvesting) invest = 0; if (jd === 0) severance = J.severance || 0; }
+    const payoffOut = (o.payoffs || []).filter((p) => p.month === label).reduce((s, p) => s + (+p.amount || 0), 0);
+    const freed = (o.payoffs || []).filter((p) => monthsBetween(p.month, label) >= 0).reduce((s, p) => s + (+p.freed || 0), 0);
     const purchases = (o.purchases || []).filter((p) => p.month === label).reduce((s, p) => s + (+p.amount || 0), 0);
-    const bonuses = (o.bonuses || []).filter((b) => (b.repeat === "yearly" ? monthsBetween(b.month, label) >= 0 && monthsBetween(b.month, label) % 12 === 0 : b.month === label)).reduce((s, b) => s + (+b.amount || 0), 0);
-    cash += inc + bonuses - exp - (o.investing || 0) - purchases;
-    const reserve = o.reserveFixed != null ? o.reserveFixed : (o.reserveMonths || 0) * exp;
-    months.push({ label, income: inc, bonuses, expenses: exp, investing: o.investing || 0, purchases, cash, reserve });
+    const bonuses = jobLost ? severance : (o.bonuses || []).filter((b) => (b.repeat === "yearly" ? monthsBetween(b.month, label) >= 0 && monthsBetween(b.month, label) % 12 === 0 : b.month === label)).reduce((s, b) => s + (+b.amount || 0), 0);
+    cash += inc + bonuses + freed - exp - invest - purchases - payoffOut;
+    const reserve = o.reserveFixed != null ? o.reserveFixed : (o.reserveMonths || 0) * (o.jobLoss ? o.expenses * Math.pow(1 + (o.expenseInflationPct || 0) / 100, yrs) : exp);
+    months.push({ label, income: inc, bonuses, expenses: exp, investing: invest, purchases, payoffs: payoffOut, freed, jobLoss: jobLost, cash, reserve });
   }
   return months;
 }

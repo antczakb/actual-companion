@@ -34,6 +34,8 @@ const actual = new FakeActual({
 const settings = new SettingsStore(path.join(dir, "settings.json"));
 const s = settings.get(); 
 s.amazon.keywordCategories = { filter: "Mortgage", "dog food": "Groceries", gift: "Gifts" };
+s.projection.existingLoans = [{ name: "Truck loan", balanceAccount: null, balance: 21500, rate: 0.069, payment: 480, payoffMonth: ym(-8), payoffAmount: null, paymentInSpending: true }];
+s.projection.jobLoss = { enabled: true, startMonth: ym(-4), months: 8, incomePct: 0.25, severance: 8000, expenseCutPct: 10, pauseInvesting: true };
 s.projection.bonuses = [{ name: "Annual bonus", month: ym(-2), amount: 12000, repeat: "yearly" }];
 s.projection.purchases = [{ month: ym(-5), amount: 85000, name: "Kitchen remodel" }, { month: ym(-14), amount: 30000, name: "Car" }];
 settings.set(s);

@@ -135,6 +135,26 @@ function historyChart(points) {
   const t = h("table", { class: "stack" }, h("thead", {}, h("tr", {}, ["Date", "Total", "Change vs previous", "Change since first"].map((c, k) => h("th", { class: k ? "n" : "" }, c)))), tbody);
   return h("div", {}, h("div", { class: "mute" }, "Tap or hover the chart to pick a snapshot; the dashed rings are the snapshots before and after it."), svg, detail, h("h2", {}, "Snapshots over time"), h("div", { class: "tablewrap stackwrap" }, t));
 }
+function existingSection(r) {
+  if (!r.existing?.length) return null;
+  return [stepH(null, "Existing loans you would pay off", TIPS.existing), table([
+    { label: "Loan", key: "name" }, { label: "Balance today", num: 1, render: (x) => usd(x.balance) }, { label: "Pay off in", key: "payoffMonth" },
+    { label: "Payoff amount", num: 1, render: (x) => usd(x.payoffAmount) + (x.auto ? " (calculated)" : "") }, { label: "Payment freed / month", num: 1, render: (x) => (x.freedPayment ? usd(x.freedPayment) : "none") },
+    { label: "Payments avoided", num: 1, render: (x) => (Number.isFinite(x.monthsOfPaymentsAvoided) ? x.monthsOfPaymentsAvoided + " mo" : "never ends") }, { label: "Interest avoided", num: 1, render: (x) => (x.interestAvoided == null ? "n/a" : usd(x.interestAvoided)) },
+  ], r.existing), h("div", { class: "mute note" }, "The payoff amount is included in the cash projection and in sizing a new loan. Paying it off removes the monthly payment from the payoff month on.")];
+}
+function stressSection(r) {
+  const st = r.stress; if (!st || !st.startMonthInHorizon) return null;
+  const J = st.scenario, one = (s) => s && [s.lowestCash < 0 ? h("b", { class: "down" }, usd(s.lowestCash)) : usd(s.lowestCash), s.lowestMonth, s.firstNegativeMonth ? `${s.firstNegativeMonth} (${s.runwayMonths} mo in)` : "never", String(s.monthsBelowReserve)];
+  const rows = [["No new loan", one(st.noLoan)], st.withLoan ? [`With the ${usd(st.loan)} loan`, one(st.withLoan)] : null].filter((x) => x[1]);
+  const worst = st.withLoan || st.noLoan;
+  const verdict = worst.firstNegativeMonth ? `Cash would run out in ${worst.firstNegativeMonth}, ${worst.runwayMonths} month(s) after the job loss${st.withLoan ? " even with the loan" : ""}.` : `Cash stays above zero through the whole window (lowest ${usd(worst.lowestCash)} in ${worst.lowestMonth})${worst.monthsBelowReserve ? `, but it spends ${worst.monthsBelowReserve} month(s) below your reserve target` : ""}.`;
+  const out = st.rows, labels = out.map((x) => x.label);
+  return [stepH(null, `Job loss stress test (from ${J.startMonth}, ${J.months ? J.months + " months" : "rest of window"})`, TIPS.jobloss),
+    h("div", { class: "verdict " + (worst.firstNegativeMonth ? "caution" : "ok") }, verdict),
+    table([{ label: "", render: (x) => h("b", {}, x[0]) }, { label: "Lowest cash", num: 1, render: (x) => x[1][0] }, { label: "In month", render: (x) => x[1][1] }, { label: "Cash runs out", render: (x) => x[1][2] }, { label: "Months under reserve", num: 1, render: (x) => x[1][3] }], rows),
+    lineChart([{ name: "Cash, normal", color: "#888", dash: true, values: r.rows.map((x) => x.cash) }, { name: "Cash, job loss, no loan", color: "#c0362c", values: out.map((x) => x.cash) }, ...(st.withLoan ? [{ name: "Cash, job loss, with loan", color: "#1f5fbf", values: out.map((x) => x.cashWithLoan) }] : []), { name: "Reserve target", color: "#c55a11", dash: true, values: out.map((x) => x.reserve) }], labels)];
+}
 // Cash chart for the selected loan. Checkboxes add the cash line for each payoff strategy (paying the loan off faster uses more cash).
 const PLAN_COLORS = ["#1c7a3d", "#8a3ffc", "#d12771", "#0b8a8a", "#b28600", "#6f4e37", "#111111"];
 function cashChart(r) {
@@ -158,6 +178,8 @@ const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"
 function addMonthsJs(ym, n) { const [y, m] = ym.split("-").map(Number), t = y * 12 + (m - 1) + n; return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`; }
 // ---------- Loan ----------
 const TIPS = {
+  existing: "Pay off a loan you already have (for example a car loan) in a month you choose. The payoff amount leaves your cash that month, which can make a new loan necessary; from then on the loan's monthly payment stops, so your cash flow improves. Leave Payoff amount blank and the app works out the remaining balance from your rate and payment. Tick "In spending?" if that payment already comes out of the accounts Actual averages for your spending; otherwise no monthly saving is counted.",
+  jobloss: "A stress test, not a forecast. It re-runs your projection with a job loss: from the start month, only the share of income you enter keeps coming in (partner income, unemployment), spending drops by the percentage you enter, investing can pause, bonuses stop, and any severance arrives in the first month. Then it shows how low cash goes, when it would run out, and how the loan you are looking at changes that. Months out of work 0 means the rest of the look-ahead window.",
   bonuses: "Expected bonuses or other lump sums of cash coming in (after tax, as they land in your account). Each is added to projected cash in the month you pick. \"Every year\" repeats it every 12 months from that month. Your regular income already comes from Actual, so only enter bonuses that are NOT in your normal paychecks; a bonus you received in the last 12 months is already averaged into income.",
   purchases: "Large cash purchases you expect. Each one is subtracted from your projected cash in the month you pick. Loans are sized to cover the months where cash would otherwise fall below your floor.",
   situation: "Your cash, income, spending and investing come from Actual: cash is the balance of your on-budget accounts today; income, spending and investing are the average of the last 12 months of transactions (transfers to off-budget accounts count as investing, transfers between on-budget accounts are ignored).",
@@ -205,7 +227,7 @@ async function loanTab() {
   ], extra: actualCheck });
   let S = await api("/api/settings"), selected = S.loan.product, accts = [], acctNote = "";
   try { accts = await api("/api/accounts"); } catch (e) { acctNote = "Could not read accounts from Actual (" + e.message + "). Enter values by hand."; }
-  const bonuses = (S.projection.bonuses || []).map((b) => ({ ...b })), purchases = S.projection.purchases.map((p) => ({ ...p })), products = S.loan.products.map((p) => ({ ...p }));
+  const existingLoans = (S.projection.existingLoans || []).map((x) => ({ ...x })), jl = { ...S.projection.jobLoss }, bonuses = (S.projection.bonuses || []).map((b) => ({ ...b })), purchases = S.projection.purchases.map((p) => ({ ...p })), products = S.loan.products.map((p) => ({ ...p }));
   const nextMonth = (k) => { const d = new Date(); d.setMonth(d.getMonth() + k); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
   const inp = (type, val, on, extra = {}) => { const e = h("input", { type, class: "in", step: "any", value: val ?? "", ...extra }); e.addEventListener("input", () => on(e)); return e; };
   const numOrNull = (e) => (e.value === "" ? null : Number(e.value));
@@ -227,6 +249,33 @@ async function loanTab() {
         })))) : h("div", { class: "mute" }, "None yet. Add bonuses or other lump sums you expect to receive."),
       h("div", { class: "row actions" }, h("button", { class: "alt", onclick: () => { bonuses.push({ name: "", month: nextMonth(2), amount: 0, repeat: "once" }); drawBonuses(); } }, "+ Add bonus"), h("span", { class: "mute" }, bonuses.length ? `Listed: ${usd(yr)} (yearly ones repeat)` : "")));
   }
+
+  // Existing loans to pay off
+  const eBox = h("div");
+  const syncExisting = () => existingLoans.forEach((x) => { if (x._src) { x.balanceAccount = x._src.account; x.balance = x._src.custom; } });
+  function drawExisting() {
+    const heads = ["Loan", "Balance today", "Rate %", "Payment / mo ($)", "Pay off in", "Payoff $ (blank = auto)", "In spending?", ""];
+    const td = (i, ...k) => h("td", { "data-label": heads[i] }, k);
+    fill(eBox, existingLoans.length ? h("div", { class: "tablewrap stackwrap" }, h("table", { class: "stack" }, h("thead", {}, h("tr", {}, heads.map((x) => h("th", {}, x)))),
+      h("tbody", {}, existingLoans.map((x, i) => {
+        x._src = srcField(x.balance, x.balanceAccount, true, null);
+        const cb = h("input", { type: "checkbox" }); cb.checked = x.paymentInSpending !== false; cb.addEventListener("change", () => (x.paymentInSpending = cb.checked));
+        return h("tr", {},
+          td(0, inp("text", x.name, (e) => (x.name = e.value), { placeholder: "e.g. Truck loan" })), td(1, h("div", { class: "stackcell" }, x._src.sel, x._src.num)),
+          td(2, inp("number", Math.round((x.rate || 0) * 1e6) / 1e4, (e) => (x.rate = +e.value / 100), { min: 0, inputmode: "decimal" })),
+          td(3, inp("number", x.payment, (e) => (x.payment = +e.value || 0), { min: 0, inputmode: "decimal" })),
+          td(4, inp("month", x.payoffMonth, (e) => (x.payoffMonth = e.value))),
+          td(5, inp("number", x.payoffAmount, (e) => (x.payoffAmount = e.value === "" ? null : +e.value), { min: 0, placeholder: "auto", inputmode: "decimal" })),
+          td(6, cb), td(7, h("button", { class: "alt", onclick: () => { syncExisting(); existingLoans.splice(i, 1); drawExisting(); } }, "Remove")));
+      })))) : h("div", { class: "mute" }, "None yet. Add a loan you want to pay off early."),
+      h("div", { class: "row actions" }, h("button", { class: "alt", onclick: () => { syncExisting(); existingLoans.push({ name: "", balance: 0, balanceAccount: null, rate: 0.06, payment: 0, payoffMonth: nextMonth(6), payoffAmount: null, paymentInSpending: true }); drawExisting(); } }, "+ Add loan to pay off")));
+  }
+
+  // Job loss stress test
+  const jlOn = h("input", { type: "checkbox" }), jlPause = h("input", { type: "checkbox" });
+  jlOn.checked = !!jl.enabled; jlPause.checked = jl.pauseInvesting !== false;
+  const jf = { start: inp("month", jl.startMonth || nextMonth(3), () => {}), months: inp("number", jl.months ?? 6, () => {}, { min: 0 }), income: inp("number", Math.round((jl.incomePct || 0) * 100), () => {}, { min: 0, max: 100 }),
+    sev: inp("number", jl.severance || 0, () => {}, { min: 0 }), cut: inp("number", jl.expenseCutPct ?? 10, () => {}, { min: 0, max: 100 }) };
 
   // Step 1: planned purchases
   const pBox = h("div");
@@ -339,6 +388,9 @@ async function loanTab() {
     S = await api("/api/settings"); // pick up anything changed in this tab's Settings panel
     const s = structuredClone(S);
     s.projection.bonuses = bonuses.filter((b) => b.month || +b.amount).map((b) => ({ name: b.name || "", month: b.month, amount: +b.amount || 0, repeat: b.repeat === "yearly" ? "yearly" : "once" }));
+    syncExisting();
+    s.projection.existingLoans = existingLoans.filter((x) => (x.name || "").trim() || +x.balance || x.balanceAccount).map((x) => ({ name: (x.name || "").trim() || "Loan", balanceAccount: x.balanceAccount || null, balance: +x.balance || 0, rate: x.rate || 0, payment: +x.payment || 0, payoffMonth: x.payoffMonth, payoffAmount: x.payoffAmount == null ? null : +x.payoffAmount, paymentInSpending: x.paymentInSpending !== false }));
+    s.projection.jobLoss = { enabled: jlOn.checked, startMonth: jf.start.value, months: Math.max(0, Math.round(+jf.months.value || 0)), incomePct: Math.min(1, Math.max(0, (+jf.income.value || 0) / 100)), severance: +jf.sev.value || 0, expenseCutPct: Math.min(100, Math.max(0, +jf.cut.value || 0)), pauseInvesting: jlPause.checked };
     s.projection.purchases = purchases.filter((p) => p.month || +p.amount).map((p) => ({ name: p.name || "", month: p.month, amount: +p.amount || 0 }));
     s.loan.products = products.map((p) => ({ ...p, name: (p.name || "").trim() }));
     if (!s.loan.products.some((p) => p.name === selected)) selected = s.loan.products[0].name;
@@ -390,7 +442,9 @@ async function loanTab() {
         kp(usd(s.worstShortfall), "Worst gap without a loan", TIPS.worstGap), kp(usd(s.paymentInterestOnly) + " / " + usd(s.paymentRepayment), "Payment: interest-only / repay", TIPS.payment),
         kp(pct(s.paymentPctOfSurplus), "Highest payment vs. surplus", TIPS.pctSurplus), kp(pct(s.combinedLtv), "Combined LTV", TIPS.ltv)),
       cashChart(r),
+      existingSection(r),
       payoffSection(r),
+      stressSection(r),
       stepH(null, "Month by month"),
       table([{ label: "Month", key: "label" }, { label: "Cash, no loan", num: 1, render: (x) => usd(x.cash) }, { label: "Bonuses", num: 1, render: (x) => (x.bonuses ? usd(x.bonuses) : "") }, { label: "Purchases", num: 1, render: (x) => usd(x.purchases) }, { label: "Reserve", num: 1, tip: "Reserve target = reserve months x that month's spending (or your fixed amount).", render: (x) => usd(x.reserve) },
         { label: "Cash, with loan", num: 1, tip: "Cash without the loan + (loan x (1 - fee % - payments so far per $1) - fixed fee).", render: (x) => usd(x.cashWithLoan) }, { label: "Loan payment", num: 1, render: (x) => usd(x.loanPayment) }, { label: "No loan", key: "statusNoLoan" }, { label: "With loan", key: "statusWithLoan" }], r.rows,
@@ -423,11 +477,12 @@ async function loanTab() {
   }
   go.addEventListener("click", () => calc(true));
   const field = (label, el, hint, t) => h("label", {}, h("span", { class: "lbl" }, label, t ? tip(t) : null), el, hint ? h("small", { class: "mute" }, hint) : null);
-  drawPurchases(); drawBonuses(); drawProducts();
+  drawPurchases(); drawBonuses(); drawExisting(); drawProducts();
   root.append(
     h("div", { class: "intro" }, h("b", {}, "Plan a large purchase."), " Blue boxes are inputs; everything else is calculated. Your cash, income and spending are read from Actual. Hover or tap the ", tip("Like this: an explanation of how the number is worked out."), " marks to see how each number is calculated."),
     stepH(1, "Planned large purchases", TIPS.purchases), h("div", { class: "card" }, pBox),
     h("h3", {}, "Expected bonuses ", tip(TIPS.bonuses)), h("div", { class: "card" }, bBox),
+    h("h3", {}, "Existing loans to pay off ", tip(TIPS.existing)), h("div", { class: "card" }, eBox),
     stepH(2, "Your situation", TIPS.situation),
     h("div", { class: "card" }, acctNote ? h("div", { class: "warn" }, acctNote) : h("div", { class: "mute note" }, "Pick an Actual account to use its current balance (a mortgage shows as a positive amount owed), or choose Custom value and type a number."), h("div", { class: "row fields" },
       field("Home value: account", src.homeValue.sel, null, TIPS.homeValue), field("Home value ($)", src.homeValue.num), field("Mortgage: account", src.mortgage.sel), field("Mortgage balance ($)", src.mortgage.num),
@@ -435,6 +490,9 @@ async function loanTab() {
       field("Keep a reserve?", f.protect, null, TIPS.reserve), field("Reserve (months)", f.reserveMonths), field("Extra cushion ($)", f.cushion, null, TIPS.cushion), field("Look ahead (months)", f.horizon, null, TIPS.horizon), field("Payment cap (% of surplus)", f.payoffPct, "for payoff strategies", TIPS.payoffPct)),
       h("details", { class: "more" }, h("summary", {}, "Override what Actual says (monthly $)"), h("div", { class: "row fields" }, field("Income", f.income), field("Spending", f.expenses), field("To investments/debt", f.investing)))),
     stepH(3, "Loans to compare", TIPS.loans), h("div", { class: "card" }, prBox, h("div", { class: "mute note" }, "Rate and fee are percentages. Interest-only years: payments are interest only before the repayment term starts (a HELOC draw period).")),
+    h("h3", {}, "Job loss stress test ", tip(TIPS.jobloss)), h("div", { class: "card" },
+      h("label", { class: "check" }, jlOn, "Include a job-loss stress test in the results"),
+      h("div", { class: "row fields" }, field("Job loss starts", jf.start), field("Months out of work (0 = rest of window)", jf.months), field("Income still coming in (% of normal)", jf.income, "partner pay, unemployment"), field("Severance after tax ($)", jf.sev), field("Spending cut (%)", jf.cut), h("label", { class: "check" }, jlPause, "Pause investing and debt transfers"))),
     h("div", { class: "row actions" }, go,
       h("details", { class: "more" }, h("summary", {}, "Try a specific amount or draw month"), h("div", { class: "row fields" }, field("Loan amount ($)", adv.loan), field("Draw month", adv.draw)))),
     msg, out, scenBox, scenOut);

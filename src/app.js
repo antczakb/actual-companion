@@ -8,6 +8,8 @@ import { parseAmazonCSV, matchAmazon } from "./lib/amazon.js";
 import { getSimpleFIN, toTables } from "./lib/simplefin.js";
 import { diagnoseUrl } from "./lib/diagnose.js";
 import { addMonths, currentMonth, lastDayOf } from "./lib/dates.js";
+import { planExistingLoan } from "./lib/existing.js";
+import { monthsBetween } from "./lib/flows.js";
 import { ASSET_TYPES } from "./lib/assets.js";
 import { extractValue, parseWatchId } from "./adapters/changedetection.js";
 import { localDate } from "./lib/schedule.js";
@@ -45,8 +47,17 @@ export function createHandlers(d) {
         return { value: custom || 0, source: "custom" };
       };
       const home = resolve("Home value", L.homeValue, L.homeValueAccount, false), mort = resolve("Mortgage", L.mortgage, L.mortgageAccount, true), liens = resolve("Other liens", L.otherLiens, L.otherLiensAccount, true);
-      const months = buildProjection({ startMonth: month0(), horizon: L.horizonMonths, cash0, income, expenses, investing,
-        incomeGrowthPct: P.incomeGrowthPct, expenseInflationPct: P.expenseInflationPct, reserveMonths: P.reserveMonths, reserveFixed: P.reserveFixed, purchases: P.purchases, bonuses: P.bonuses || [] });
+      // Existing loans you plan to pay off: cash out in the payoff month, the monthly payment comes back after.
+      const existing = (P.existingLoans || []).map((x) => {
+        const bal = resolve(`Existing loan "${x.name}"`, +x.balance, x.balanceAccount, true);
+        const plan = planExistingLoan({ balance: bal.value, rate: +x.rate || 0, payment: +x.payment || 0, payoffAmount: x.payoffAmount == null ? null : +x.payoffAmount, paymentInSpending: x.paymentInSpending !== false }, monthsBetween(month0(), x.payoffMonth));
+        if (monthsBetween(month0(), x.payoffMonth) < 0) warnings.push(`Existing loan "${x.name}": the payoff month is in the past, so it is treated as paid off this month.`);
+        return { name: x.name, payoffMonth: x.payoffMonth < month0() ? month0() : x.payoffMonth, balance: bal.value, balanceSource: bal.source, rate: +x.rate || 0, payment: +x.payment || 0, ...plan };
+      });
+      const common = { startMonth: month0(), horizon: L.horizonMonths, cash0, income, expenses, investing,
+        incomeGrowthPct: P.incomeGrowthPct, expenseInflationPct: P.expenseInflationPct, reserveMonths: P.reserveMonths, reserveFixed: P.reserveFixed, purchases: P.purchases, bonuses: P.bonuses || [],
+        payoffs: existing.map((e) => ({ month: e.payoffMonth, amount: e.payoffAmount, freed: e.freedPayment, name: e.name })) };
+      const months = buildProjection(common);
       const product = L.products.find((p) => p.name === (query.product || L.product));
       if (!product) throw httpErr(400, "Unknown loan product.");
       const base = {
@@ -66,7 +77,26 @@ export function createHandlers(d) {
         const pick = (x) => x && { name: x.name, months: x.months, payment: x.payment, paidOffBy: x.paidOffBy, totalInterest: x.totalInterest, totalCost: x.totalCost, interestSaved: x.interestSaved };
         return { ...row, fullTerm: pick(min) || null, fastest: pick(fast) || null };
       };
+      // Job-loss stress test: the same projection with income cut, run with and without the loan you are looking at.
+      const J = P.jobLoss;
+      let stress = null;
+      if (J?.enabled && /^\d{4}-\d{2}$/.test(J.startMonth || "")) {
+        const sm = buildProjection({ ...common, jobLoss: { startMonth: J.startMonth, months: +J.months || 0, incomePct: +J.incomePct || 0, severance: +J.severance || 0, expenseCutPct: +J.expenseCutPct || 0, pauseInvesting: !!J.pauseInvesting } });
+        const used = result.summary.usedLoan || 0;
+        const sr = sizeLoan({ ...base, product, months: sm, loanOverride: used, drawMonth: used ? result.summary.drawLabel : null });
+        const startIdx = sm.findIndex((m) => m.jobLoss);
+        const stat = (rows, key) => {
+          if (!rows.length) return null;
+          const min = rows.reduce((a, r) => (r[key] < a[key] ? r : a), rows[0]), neg = rows.findIndex((r) => r[key] < 0), below = rows.filter((r) => r[key] < r.reserve).length;
+          return { lowestCash: Math.round(min[key]), lowestMonth: min.label, firstNegativeMonth: neg >= 0 ? rows[neg].label : null, runwayMonths: neg >= 0 && startIdx >= 0 ? Math.max(0, neg - startIdx) : null, monthsBelowReserve: below };
+        };
+        const fromJob = startIdx >= 0 ? sr.rows.slice(startIdx) : [];
+        stress = { scenario: J, startMonthInHorizon: startIdx >= 0, loan: used, noLoan: stat(fromJob, "cash"), withLoan: used ? stat(fromJob, "cashWithLoan") : null,
+          rows: sr.rows.map((r) => ({ label: r.label, cash: Math.round(r.cash), cashWithLoan: Math.round(r.cashWithLoan), reserve: Math.round(r.reserve), jobLoss: !!sm.find((m) => m.label === r.label)?.jobLoss })) };
+        if (startIdx < 0) warnings.push("The job-loss start month is outside the look-ahead window, so the stress test shows nothing. Move it earlier or look ahead further.");
+      }
       return {
+        existing, stress,
         resolved: { homeValue: home, mortgage: mort, otherLiens: liens },
         assumptions: { cashToday: cash0, cashAccounts: cashAccts.map((a) => a.name), monthlyIncome: income, monthlyExpenses: expenses, monthlyInvesting: investing, monthlySurplus: income - expenses - investing, monthsOfHistory: avg.monthsUsed },
         payoff, summary: result.summary, rows: result.rows, comparison: compareProducts(base, L.products).map((c, i) => withFastest(c, L.products[i])), warnings, products: L.products.map((p) => p.name),

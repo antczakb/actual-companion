@@ -134,3 +134,8 @@ Amazon has no personal API. Request your data from Amazon (Account > Request My 
 4. A reading more than 25% away from the last value is not saved; it shows as a warning on the asset so a mis-scrape cannot rewrite your history.
 
 Note: Zillow, Redfin and KBB often block automated visitors and their terms restrict scraping, so a watch on those sites may fail or return a challenge page. A county assessor page is the most reliable for a house; a dealer or marketplace listing for a similar vehicle works for cars.
+
+## Job loss stress test and existing-loan payoff (v0.1.17)
+
+- **Existing loans to pay off** (Loan tab): balance (Actual account or typed), rate, monthly payment and the month you would pay it off. The payoff amount is computed from the rate and payment unless you enter one. It leaves cash in that month (which can change the size of a new loan you need) and, from then on, the monthly payment stops. "In spending?" says whether that payment is already part of the spending Actual averages; if not, no saving is counted.
+- **Job loss stress test**: from a start month, only the share of income you enter keeps coming in, spending is cut by your percentage, investing can pause, bonuses stop and severance lands in the first month. The results show the lowest cash, when cash runs out, and months under your reserve, with and without the loan you are looking at.
