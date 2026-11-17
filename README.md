@@ -139,3 +139,12 @@ Note: Zillow, Redfin and KBB often block automated visitors and their terms rest
 
 - **Existing loans to pay off** (Loan tab): balance (Actual account or typed), rate, monthly payment and the month you would pay it off. The payoff amount is computed from the rate and payment unless you enter one. It leaves cash in that month (which can change the size of a new loan you need) and, from then on, the monthly payment stops. "In spending?" says whether that payment is already part of the spending Actual averages; if not, no saving is counted.
 - **Job loss stress test**: from a start month, only the share of income you enter keeps coming in, spending is cut by your percentage, investing can pause, bonuses stop and severance lands in the first month. The results show the lowest cash, when cash runs out, and months under your reserve, with and without the loan you are looking at.
+
+## Value estimates without scraping (v0.1.18)
+
+In the Assets tab, edit an asset and choose **Estimate automatically**:
+
+- **House price index (FRED):** enter a value you trust (an appraisal, a purchase price, a recent estimate), its date, and a FRED series ID. The app scales your value by how the index has moved since then. FHFA publishes free all-transactions house price indexes by state (for example `NCSTHPI`) and by metro area; `USSTHPI` is the US average. Get a free API key at fredaccount.stlouisfed.org and set `FRED_API_KEY` in `/etc/actual-companion.env`. Indexes update quarterly and are about two months behind.
+- **Depreciation:** enter a known value, its date and a yearly percentage (cars often 10-15%, campers 8-10%). It ignores mileage and condition.
+
+The nightly job refreshes an estimate when the last one is a week old; "Estimate now" does it immediately. When you enter a real quote by hand, enter a new starting value as well so the estimate restarts from it.

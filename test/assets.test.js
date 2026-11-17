@@ -99,3 +99,41 @@ test("fetching a watched value: records it, holds back a wild jump, reports a mi
   text = "no numbers"; await assert.rejects(h["POST /api/assets/fetch"]({ body: { id: a.id } }), /No dollar amount/);
   await assert.rejects(h["POST /api/assets"]({ body: { name: "X", type: "home", watchId: "nope" } }), /watch ID/);
 });
+
+import { computeEstimate, validateEstimate } from "../src/lib/estimate.js";
+import { FredAdapter } from "../src/adapters/fred.js";
+
+test("estimates: depreciation ages a value, index scales it, validation is strict", async () => {
+  const dep = validateEstimate({ method: "depreciation", baseValue: 30000, baseDate: "2025-11-16", annualRate: 0.15 });
+  assert.equal((await computeEstimate(dep, "2026-11-16", null)).value, Math.round(30000 * Math.pow(0.85, 365 / 365.25)));
+  const fred = { observation: async (s, on) => (on ? { date: "2025-10-01", value: 400 } : { date: "2026-07-01", value: 420 }) };
+  const idx = validateEstimate({ method: "index", baseValue: 600000, baseDate: "2025-11-01", series: "USSTHPI" });
+  const r = await computeEstimate(idx, "2026-11-16", fred);
+  assert.equal(r.value, 630000); assert.match(r.detail, /5\.0%/);
+  assert.equal(validateEstimate(null), null);
+  assert.throws(() => validateEstimate({ method: "magic" }), /method/);
+  assert.throws(() => validateEstimate({ method: "index", baseValue: 1, baseDate: "2025-01-01", series: "bad id!" }), /series/);
+  assert.throws(() => validateEstimate({ method: "depreciation", baseValue: 1, baseDate: "2025-01-01", annualRate: 2 }), /depreciation/);
+});
+
+test("fred adapter: picks the newest numeric value, skips missing dots, readable errors", async () => {
+  const mk = (status, body) => new FredAdapter({ apiKey: "k", fetchImpl: async (u) => { assert.match(u, /series_id=USSTHPI/); return { status, ok: status < 300, json: async () => body }; } });
+  assert.deepEqual(await mk(200, { observations: [{ date: "2026-10-01", value: "." }, { date: "2026-07-01", value: "401.5" }] }).observation("USSTHPI"), { date: "2026-07-01", value: 401.5 });
+  await assert.rejects(mk(400, {}).observation("USSTHPI"), /rejected/);
+  await assert.rejects(mk(200, { observations: [] }).observation("USSTHPI"), /no values/);
+  await assert.rejects(new FredAdapter({}).observation("USSTHPI"), /not configured/);
+  await assert.rejects(mk(200, {}).observation("bad id"), /looks wrong/);
+});
+
+test("estimate recorded on demand and by the nightly job only when the last estimate is a week old", async () => {
+  const dir = tmp(), assets = new AssetStore(path.join(dir, "a.json"));
+  const a = assets.upsert({ name: "Truck", type: "vehicle", estimate: { method: "depreciation", baseValue: 30000, baseDate: "2026-01-01", annualRate: 0.12 } });
+  let day = 16;
+  const h = createHandlers({ actual: {}, snaptrade: null, store: {}, settings: new SettingsStore(path.join(dir, "s.json")), scenarios: null, assets, snapshotState: null, simplefin: {}, fred: null, now: () => new Date(2026, 10, day, 23, 55) });
+  const r = await h["POST /api/assets/estimate"]({ body: { id: a.id } });
+  assert.ok(r.value > 25000 && r.value < 27500);
+  assert.equal(assets.view("2026-11-16").assets[0].current.source, "estimate");
+  const s1 = await h.runSnapshot(); assert.equal(s1.assets, 0, "same week: not recorded again");
+  day = 24; const s2 = await h.runSnapshot(); assert.equal(s2.assets, 1);
+  assert.equal(assets.view("2026-11-24").assets[0].values.length, 2);
+});

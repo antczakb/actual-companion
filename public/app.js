@@ -178,7 +178,7 @@ const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"
 function addMonthsJs(ym, n) { const [y, m] = ym.split("-").map(Number), t = y * 12 + (m - 1) + n; return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`; }
 // ---------- Loan ----------
 const TIPS = {
-  existing: "Pay off a loan you already have (for example a car loan) in a month you choose. The payoff amount leaves your cash that month, which can make a new loan necessary; from then on the loan's monthly payment stops, so your cash flow improves. Leave Payoff amount blank and the app works out the remaining balance from your rate and payment. Tick "In spending?" if that payment already comes out of the accounts Actual averages for your spending; otherwise no monthly saving is counted.",
+  existing: "Pay off a loan you already have (for example a car loan) in a month you choose. The payoff amount leaves your cash that month, which can make a new loan necessary; from then on the loan's monthly payment stops, so your cash flow improves. Leave Payoff amount blank and the app works out the remaining balance from your rate and payment. Tick \"In spending?\" if that payment already comes out of the accounts Actual averages for your spending; otherwise no monthly saving is counted.",
   jobloss: "A stress test, not a forecast. It re-runs your projection with a job loss: from the start month, only the share of income you enter keeps coming in (partner income, unemployment), spending drops by the percentage you enter, investing can pause, bonuses stop, and any severance arrives in the first month. Then it shows how low cash goes, when it would run out, and how the loan you are looking at changes that. Months out of work 0 means the rest of the look-ahead window.",
   bonuses: "Expected bonuses or other lump sums of cash coming in (after tax, as they land in your account). Each is added to projected cash in the month you pick. \"Every year\" repeats it every 12 months from that month. Your regular income already comes from Actual, so only enter bonuses that are NOT in your normal paychecks; a bonus you received in the last 12 months is already averaged into income.",
   purchases: "Large cash purchases you expect. Each one is subtracted from your projected cash in the month you pick. Loans are sized to cover the months where cash would otherwise fall below your floor.",
@@ -726,22 +726,29 @@ function assetsTab() {
   const root = $("assets"), out = h("div"), today = new Date().toISOString().slice(0, 10);
   const field = (label, el) => h("label", { class: "setfield" }, h("span", { class: "lbl" }, label), el);
   const mk = (type, val, extra = {}) => h("input", { type, class: "in", step: "any", value: val ?? "", ...extra });
-  let accounts = [], cdOn = false;
+  let accounts = [], cdOn = false, fredOn = false;
   const acctSelect = (cur) => { const s = h("select", {}, h("option", { value: "" }, "None, I'll enter values by hand"), accounts.map((a) => h("option", { value: a.name }, `${a.name} (${usd(a.balance)})`))); s.value = cur || ""; return s; };
   const guard = (box, fn) => async () => { try { await fn(); } catch (e) { box.replaceChildren(h("div", { class: "err" }, e.message)); } };
 
   function assetForm(a, done) {
     const name = mk("text", a?.name, { placeholder: "e.g. Primary home" }), type = h("select", {}, Object.entries(ASSET_LABEL).map(([k, v]) => h("option", { value: k }, v))); type.value = a?.type || "home";
     const link = acctSelect(a?.actualAccount), watch = mk("text", a?.watchId, { placeholder: "Paste the watch ID or its edit URL" }), rx = mk("text", a?.valueRegex, { placeholder: "Optional, e.g. Zestimate[^$]*\\$([0-9,]+)" }), msg = h("div"), val = mk("number", "", { min: 0, inputmode: "decimal", placeholder: "Current value" });
+    const E = a?.estimate || {}, em = h("select", {}, h("option", { value: "" }, "No automatic estimate"), h("option", { value: "index" }, "House price index (FRED)"), h("option", { value: "depreciation" }, "Depreciation (vehicles, campers)")); em.value = E.method || "";
+    const eBase = mk("number", E.baseValue, { min: 0, placeholder: "Known value ($)" }), eDate = mk("date", E.baseDate || today), eSeries = mk("text", E.series || "USSTHPI", { placeholder: "FRED series, e.g. USSTHPI" }), eRate = mk("number", E.annualRate != null ? Math.round(E.annualRate * 1000) / 10 : 12, { min: 0, max: 60, step: "0.1" });
+    const eBox = h("div"), hint = (t) => h("small", { class: "mute", style: "display:block;margin:6px 0" }, t);
+    const drawE = () => fill(eBox, em.value ? [h("div", { class: "row fields" }, field("Known value ($)", eBase), field("As of", eDate), em.value === "index" ? field("FRED index series", eSeries) : field("Yearly depreciation (%)", eRate)),
+      hint(em.value === "index" ? (fredOn ? "A house price index scales your known value by how the index has moved since that date. FHFA publishes free indexes by state and metro area on FRED (search FRED for \"All-Transactions House Price Index\" and your area); USSTHPI is the US average. Indexes update quarterly." : "House price index estimates need a free FRED API key: set FRED_API_KEY on the server (see README).") : "Depreciation ages your known value at a steady yearly rate. It ignores mileage and condition, so replace it with a real quote when you have one.")] : null);
+    em.addEventListener("change", drawE); drawE();
     const save = h("button", { class: "act" }, a ? "Save changes" : "Add asset");
     save.addEventListener("click", guard(msg, async () => {
-      const rec = await api("/api/assets", { body: { id: a?.id, name: name.value, type: type.value, actualAccount: link.value || null, watchId: watch.value.trim() || null, valueRegex: rx.value.trim() } });
+      const rec = await api("/api/assets", { body: { id: a?.id, name: name.value, type: type.value, actualAccount: link.value || null, watchId: watch.value.trim() || null, valueRegex: rx.value.trim(), estimate: em.value ? { method: em.value, baseValue: +eBase.value, baseDate: eDate.value, series: eSeries.value.trim(), annualRate: (+eRate.value || 0) / 100 } : null } });
       if (!a && val.value !== "") await api("/api/assets/value", { body: { id: rec.id, date: today, value: +val.value, note: "Starting value" } });
       done();
     }));
     return h("div", { class: "card" }, h("div", { class: "row fields" }, field("Name", name), field("Type", type), field("Take the value from an Actual account", link), a ? null : field("Value today ($)", val)),
       h("div", { class: "row fields" }, field("changedetection.io watch (optional)", watch), field("Value pattern (optional)", rx)),
-      h("small", { class: "mute" }, cdOn ? "Each night the app reads the watch's latest snapshot and takes the first dollar amount in it, or the first group of your pattern. A reading more than 25% away from the last value is held back for you to check." : "changedetection.io is not connected. Set CHANGEDETECTION_URL and CHANGEDETECTION_API_KEY on the server (see README) to use a watch."),
+      h("div", { class: "row fields" }, field("Estimate automatically", em)), eBox,
+      h("small", { class: "mute", style: "display:block;margin:6px 0" }, cdOn ? "Each night the app reads the watch's latest snapshot and takes the first dollar amount in it, or the first group of your pattern. A reading more than 25% away from the last value is held back for you to check." : "changedetection.io is not connected. Set CHANGEDETECTION_URL and CHANGEDETECTION_API_KEY on the server (see README) to use a watch."),
       h("small", { class: "mute", style: "display:block;margin-top:6px" }, "Linking to an Actual account records that account's balance in each nightly snapshot, so the value updates by itself. Without a link, type in a new value whenever you check Zillow, KBB or a dealer quote."),
       h("div", { class: "row actions" }, save, h("button", { class: "alt", onclick: done }, "Cancel")), msg);
   }
@@ -752,14 +759,16 @@ function assetsTab() {
     const saveV = h("button", { class: "act" }, "Save value");
     saveV.addEventListener("click", guard(msg, async () => { await api("/api/assets/value", { body: { id: a.id, date: date.value, value: val.value === "" ? null : +val.value, note: note.value } }); await load(); }));
     const delta = (v, label) => (v == null ? null : h("span", { class: v >= 0 ? "up" : "down" }, `${v >= 0 ? "+" : "-"}${usd(Math.abs(v))} ${label}`));
-    const hist = h("details", {}, h("summary", {}, `History (${a.values.length})`), table([{ label: "Date", key: "date" }, { label: "Value", num: 1, render: (x) => usd(x.value) }, { label: "Source", render: (x) => (x.source === "actual" ? "Actual account" : x.source === "changedetection" ? "changedetection.io" : "Entered by hand") }, { label: "Note", key: "note" },
+    const hist = h("details", {}, h("summary", {}, `History (${a.values.length})`), table([{ label: "Date", key: "date" }, { label: "Value", num: 1, render: (x) => usd(x.value) }, { label: "Source", render: (x) => (x.source === "actual" ? "Actual account" : x.source === "changedetection" ? "changedetection.io" : x.source === "estimate" ? "Estimate" : "Entered by hand") }, { label: "Note", key: "note" },
       { label: "", render: (x) => h("button", { class: "alt", onclick: guard(msg, async () => { if (confirm(`Delete the ${x.date} entry?`)) { await api("/api/assets/value/delete", { body: { id: a.id, date: x.date } }); await load(); } }) }, "Delete") }], a.values.slice().reverse(), { stack: a.values.length < 30 }));
     const fetchB = a.watchId ? h("button", { class: "alt" }, "Fetch now") : null;
     fetchB?.addEventListener("click", guard(msg, async () => { fetchB.disabled = true; try { const r = await api("/api/assets/fetch", { body: { id: a.id } }); await load(); } finally { fetchB.disabled = false; } }));
     const lf = a.lastFetch ? h("div", { class: a.lastFetch.ok ? "mute" : "warn" }, `changedetection.io, ${new Date(a.lastFetch.at).toLocaleString()}: ${a.lastFetch.message}`) : null;
+    const estB = a.estimate ? h("button", { class: "alt" }, "Estimate now") : null;
+    estB?.addEventListener("click", guard(msg, async () => { estB.disabled = true; try { await api("/api/assets/estimate", { body: { id: a.id } }); await load(); } finally { estB.disabled = false; } }));
     const edit = h("button", { class: "alt", onclick: () => card.replaceWith(h("div", {}, assetForm(a, () => load()))) }, "Edit"), del = h("button", { class: "alt", onclick: guard(msg, async () => { if (confirm(`Remove ${a.name} and its history?`)) { await api("/api/assets/delete", { body: { id: a.id } }); await load(); } }) }, "Remove");
     const card = h("div", { class: "card asset" },
-      h("div", { class: "row" }, h("b", { class: "hval" }, a.name), h("span", { class: "pill" }, ASSET_LABEL[a.type] || a.type), a.actualAccount ? h("span", { class: "mute" }, `from Actual: ${a.actualAccount}`) : null, h("span", { style: "flex:1" }), fetchB, edit, del),
+      h("div", { class: "row" }, h("b", { class: "hval" }, a.name), h("span", { class: "pill" }, ASSET_LABEL[a.type] || a.type), a.actualAccount ? h("span", { class: "mute" }, `from Actual: ${a.actualAccount}`) : null, h("span", { style: "flex:1" }), estB, fetchB, edit, del),
       cur ? h("div", { class: "row" }, h("b", { style: "font-size:1.5rem" }, usd(cur.value)), h("span", { class: "mute" }, `as of ${cur.date}${a.daysOld ? ` (${a.daysOld} days ago)` : ""}`), delta(a.changeSincePrevious, "since previous"), delta(a.changeSinceFirst, `since ${a.firstDate}`)) : h("div", { class: "mute" }, "No value yet. Enter one below."),
       lf,
       stale ? h("div", { class: "warn" }, `This value is ${a.daysOld} days old. Update it so the history stays meaningful.`) : null,
@@ -768,7 +777,7 @@ function assetsTab() {
   }
 
   async function load() {
-    const [r, accts] = await Promise.all([api("/api/assets"), api("/api/accounts").catch(() => [])]); accounts = accts; cdOn = r.changedetection;
+    const [r, accts] = await Promise.all([api("/api/assets"), api("/api/accounts").catch(() => [])]); accounts = accts; cdOn = r.changedetection; fredOn = r.fred;
     const total = r.assets.reduce((s, a) => s + (a.current ? a.current.value : 0), 0);
     const addBox = h("div"), addBtn = h("button", { class: "act", onclick: () => fill(addBox, assetForm(null, () => load())) }, "+ Add asset");
     fill(out,

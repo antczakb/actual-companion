@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { validateEstimate } from "./estimate.js";
 
 export const ASSET_TYPES = ["home", "vehicle", "camper", "other"];
 const MAX_ASSETS = 100, MAX_VALUES = 5000;
@@ -14,7 +15,7 @@ export class AssetStore {
   _read() { try { const d = JSON.parse(fs.readFileSync(this.file, "utf8")); return Array.isArray(d.assets) ? d : { assets: [] }; } catch { return { assets: [] }; } }
   _write(d) { fs.mkdirSync(path.dirname(this.file), { recursive: true }); const tmp = this.file + ".tmp"; fs.writeFileSync(tmp, JSON.stringify(d)); fs.renameSync(tmp, this.file); }
   list() { return this._read().assets; }
-  upsert({ id, name, type, actualAccount, watchId = null, valueRegex = "" }) {
+  upsert({ id, name, type, actualAccount, watchId = null, valueRegex = "", estimate = null }) {
     const n = String(name || "").trim();
     if (!n || n.length > 60) throw bad("Give the asset a name (up to 60 characters).");
     if (!ASSET_TYPES.includes(type)) throw bad(`Type must be one of: ${ASSET_TYPES.join(", ")}.`);
@@ -25,7 +26,7 @@ export class AssetStore {
     if (!a) { if (d.assets.length >= MAX_ASSETS) throw bad(`Limit of ${MAX_ASSETS} assets reached.`); a = { id: crypto.randomUUID().slice(0, 8), values: [] }; d.assets.push(a); }
     const rx = String(valueRegex || "").trim();
     if (rx) { try { new RegExp(rx); } catch { throw bad("The value pattern is not a valid regular expression."); } }
-    Object.assign(a, { name: n, type, actualAccount: link, watchId: watchId || null, valueRegex: rx });
+    Object.assign(a, { name: n, type, actualAccount: link, watchId: watchId || null, valueRegex: rx, estimate: validateEstimate(estimate) });
     this._write(d); return a;
   }
   setValue(id, { date, value, note = "", source = "manual" }) {
@@ -55,7 +56,7 @@ export class AssetStore {
     const assets = this.list().map((a) => {
       const vals = a.values, cur = vals.at(-1) || null, prev = vals.length > 1 ? vals.at(-2) : null, first = vals[0] || null;
       const days = cur && todayIso ? Math.round((Date.parse(todayIso + "T00:00:00Z") - Date.parse(cur.date + "T00:00:00Z")) / 864e5) : null;
-      return { id: a.id, name: a.name, type: a.type, actualAccount: a.actualAccount, watchId: a.watchId || null, valueRegex: a.valueRegex || "", lastFetch: a.lastFetch || null, current: cur, changeSincePrevious: cur && prev ? cur.value - prev.value : null,
+      return { id: a.id, name: a.name, type: a.type, actualAccount: a.actualAccount, watchId: a.watchId || null, estimate: a.estimate || null, valueRegex: a.valueRegex || "", lastFetch: a.lastFetch || null, current: cur, changeSincePrevious: cur && prev ? cur.value - prev.value : null,
         changeSinceFirst: cur && first && vals.length > 1 ? cur.value - first.value : null, firstDate: first?.date || null, daysOld: days, values: vals };
     });
     const dates = [...new Set(assets.flatMap((a) => a.values.map((v) => v.date)))].sort();

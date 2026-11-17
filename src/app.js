@@ -8,6 +8,7 @@ import { parseAmazonCSV, matchAmazon } from "./lib/amazon.js";
 import { getSimpleFIN, toTables } from "./lib/simplefin.js";
 import { diagnoseUrl } from "./lib/diagnose.js";
 import { addMonths, currentMonth, lastDayOf } from "./lib/dates.js";
+import { computeEstimate } from "./lib/estimate.js";
 import { planExistingLoan } from "./lib/existing.js";
 import { monthsBetween } from "./lib/flows.js";
 import { ASSET_TYPES } from "./lib/assets.js";
@@ -18,7 +19,7 @@ const httpErr = (status, message) => Object.assign(new Error(message), { status 
 const num = (v) => (v === undefined || v === "" || v === null ? null : Number.isFinite(+v) ? +v : null);
 
 export function createHandlers(d) {
-  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, snapshotState, changedetection, now = () => new Date() } = d;
+  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, snapshotState, changedetection, fred, now = () => new Date() } = d;
   const month0 = () => currentMonth(now());
   const today = () => localDate(now());
 
@@ -221,11 +222,18 @@ export function createHandlers(d) {
       return { updated: done.length, skipped: [...keys].filter((k) => !done.includes(k)) };
     },
 
-    "GET /api/assets": async () => ({ types: ASSET_TYPES, changedetection: !!changedetection?.configured(), ...assets.view(today()) }),
+    "GET /api/assets": async () => ({ types: ASSET_TYPES, changedetection: !!changedetection?.configured(), fred: !!fred?.configured(), ...assets.view(today()) }),
     "POST /api/assets": async ({ body }) => {
       const b = body || {};
       if (b.watchId && !parseWatchId(b.watchId)) throw httpErr(400, "That does not look like a changedetection.io watch ID. Paste the UUID or the watch's edit URL.");
       return assets.upsert({ ...b, watchId: b.watchId ? parseWatchId(b.watchId) : null });
+    },
+    "POST /api/assets/estimate": async ({ body }) => {
+      const a = assets.list().find((x) => x.id === body?.id);
+      if (!a?.estimate) throw httpErr(a ? 400 : 404, a ? "This asset has no estimate set up." : "Asset not found.");
+      const r = await recordEstimate(a);
+      if (!r.ok) throw httpErr(400, r.message);
+      return r;
     },
     "POST /api/assets/fetch": async ({ body }) => {
       const a = assets.list().find((x) => x.id === body?.id);
@@ -259,6 +267,16 @@ export function createHandlers(d) {
     } catch (e) { return stamp(false, e.message); }
   }
 
+  async function recordEstimate(a, { onlyIfStale = false } = {}) {
+    const date = today(), lastEst = [...a.values].reverse().find((v) => v.source === "estimate");
+    if (onlyIfStale && lastEst && (Date.parse(date + "T00:00:00Z") - Date.parse(lastEst.date + "T00:00:00Z")) / 864e5 < 7) return { ok: true, message: "estimate is recent", recorded: false };
+    try {
+      const { value, detail } = await computeEstimate(a.estimate, date, fred);
+      assets.setValue(a.id, { date, value, note: `Estimate: ${detail}`, source: "estimate" });
+      return { ok: true, message: `estimated ${value.toLocaleString("en-US")} (${detail})`, recorded: true, value, date };
+    } catch (e) { return { ok: false, message: e.message }; }
+  }
+
   // End-of-day snapshot: investment balances from SnapTrade, plus today's balance for assets linked to an Actual account.
   async function runSnapshot() {
     const date = today(), out = { date, investments: 0, assets: 0, notes: [] };
@@ -267,6 +285,7 @@ export function createHandlers(d) {
       catch (e) { out.notes.push(`SnapTrade: ${e.message}`); }
     } else out.notes.push("SnapTrade not configured; investments skipped.");
     for (const a of assets.list().filter((x) => x.watchId)) { const r = await fetchWatchedValue(a); out.notes.push(`${a.name}: ${r.message}`); if (r.ok && r.recorded) out.assets++; }
+    for (const a of assets.list().filter((x) => x.estimate && !x.actualAccount && !x.watchId)) { const r = await recordEstimate(a, { onlyIfStale: true }); if (r.recorded || !r.ok) out.notes.push(`${a.name}: ${r.message}`); if (r.recorded) out.assets++; }
     const linked = assets.list().filter((a) => a.actualAccount);
     if (linked.length) {
       try {
