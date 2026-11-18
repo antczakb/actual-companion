@@ -155,3 +155,9 @@ The nightly job refreshes an estimate when the last one is a week old; "Estimate
 - **Monthly value reminder:** a banner appears from the reminder day (Assets > Settings, default the 1st) for each home, vehicle or camper you have not updated by hand this month. Each asset card has quick links (Zillow and Redfin for a home, Kelley Blue Book for a vehicle) or one link you paste for your exact page. Assets linked to an Actual account are never flagged; an estimate does not count as updating. For a push as well, set `NOTIFY_URL` in `/etc/actual-companion.env` to an ntfy topic URL (or any service that accepts a plain-text POST); it is sent on the reminder day and every 7 days while something is still due.
 - Hover or tap any chart to see the values of every line at that point.
 - Hovering the Invest or Assets tab for about a second and a half shows how those tabs fit with Actual; each of those tabs also has the same text under a collapsible heading.
+
+## v0.1.20: Net worth tab and Invest stock dashboard
+
+- **Net worth tab**: SimpleFIN balances for all your accounts are saved every night (and on "Refresh from SimpleFIN"). Each account gets a type (cash, investment, credit card, loan, other asset, ignore); the app guesses, you correct. Credit cards and loans always count as debts. Home, vehicle and camper values from the Assets tab are added. Mark any account that mirrors your house or a vehicle as Ignore to avoid double counting. Nothing is written to Actual.
+- **Invest tab** is now a stock dashboard for SnapTrade-linked brokerages: positions with share of portfolio, click a symbol for its value history, and a Bought/Sold list derived from differences between nightly snapshots (starts after the second snapshot; trades between snapshots appear as one net change).
+- New data file `balances.json` in the data directory.

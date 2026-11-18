@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS = {
   venmo: { dayWindow: 5, payeeRegex: "venmo", keywordCategories: {} },
   amazon: { dayWindow: 7, payeeRegex: "amazon|amzn", keywordCategories: {} },
   simplefin: { startDaysBack: 90, cacheHours: 6 },
+  networth: { kinds: {} }, // SimpleFIN account id -> cash | investment | credit | loan | other-asset | ignore
   reminders: { enabled: true, day: 1 }, // monthly "update your home and vehicle values" reminder (banner, plus a push if NOTIFY_URL is set)
   snapshots: { enabled: true, time: "23:55" }, // end-of-day investment and asset snapshot, server local time
 };
@@ -54,6 +55,7 @@ export function validateSettings(s) {
     try { new RegExp(s.amazon.payeeRegex || ""); } catch { errs.push("amazon.payeeRegex is not a valid pattern"); }
     for (const [k, v] of Object.entries(s.amazon.keywordCategories || {})) if (typeof v !== "string" || !k.trim()) errs.push("amazon.keywordCategories needs a word and a category name on every row");
   }
+  for (const [id, k] of Object.entries(s.networth?.kinds || {})) if (!["cash", "investment", "credit", "loan", "other-asset", "ignore"].includes(k)) errs.push(`networth.kinds.${id} is not a valid kind`);
   if (s.reminders) { if (typeof s.reminders.enabled !== "boolean") errs.push("reminders.enabled must be true or false"); num(s.reminders.day, "reminders.day", 1, 28); }
   if (s.snapshots) { if (typeof s.snapshots.enabled !== "boolean") errs.push("snapshots.enabled must be true or false"); if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.snapshots.time || "")) errs.push("snapshots.time must look like 23:55"); }
   (s.projection?.existingLoans || []).forEach((x, i) => {

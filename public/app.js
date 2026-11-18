@@ -556,13 +556,17 @@ function investTab() {
   const root = $("invest"), out = h("div"), refresh = h("button", { class: "act" }, "Refresh from SnapTrade"), connect = h("button", { class: "alt" }, "Connect a brokerage");
   async function load() {
     const r = await api("/api/investments");
-    const total = r.accounts.reduce((s, a) => s + a.balance, 0);
+    const total = r.accounts.reduce((s, a) => s + a.balance, 0), units = (v) => v.toLocaleString("en-US", { maximumFractionDigits: 4 });
+    const histBox = h("div"), pick = (sym) => { const p = (r.positions || []).find((x) => x.symbol === sym); fill(histBox, p && p.history.length > 1 ? h("div", {}, h("h3", {}, `${sym}: value over time`), historyChart(p.history.map((x) => ({ date: x.date, total: x.value, parts: [{ name: "Units", balance: x.units }] }))), h("div", { class: "mute" }, "Value moves with price and with what you bought or sold; see the activity list below for the trades.")) : h("div", { class: "mute" }, `${sym}: not enough snapshots yet to draw a history (needs two or more days).`)); histBox.scrollIntoView({ block: "nearest", behavior: "smooth" }); };
+    const grand = r.holdings.reduce((s, x) => s + x.value, 0);
     fill(out,
       !r.configured ? h("div", { class: "warn" }, "SnapTrade is not configured. Set SNAPTRADE_CLIENT_ID and SNAPTRADE_CONSUMER_KEY (see README).") : null,
-      h("div", { class: "kpis" }, h("div", { class: "kpi" }, h("b", {}, usd(total)), h("span", {}, "Total, latest snapshots")), h("div", { class: "kpi" }, h("b", {}, r.accounts.length), h("span", {}, "Accounts"))),
-      r.series.length ? historyChart(r.series) : h("div", { class: "mute" }, "No snapshots yet. Connect a brokerage, then refresh."),
-      h("h2", {}, "Accounts"), table([{ label: "Account", key: "name" }, { label: "Institution", key: "institution" }, { label: "As of", key: "date" }, { label: "Balance", num: 1, render: (x) => usd(x.balance, 2) }, { label: "Cash", num: 1, render: (x) => usd(x.cash, 2) }], r.accounts),
-      h("h2", {}, "Holdings (all accounts)"), table([{ label: "Symbol", key: "symbol" }, { label: "Description", key: "description" }, { label: "Units", num: 1, render: (x) => x.units.toLocaleString("en-US", { maximumFractionDigits: 4 }) }, { label: "Value", num: 1, render: (x) => usd(x.value, 2) }, { label: "Accounts", render: (x) => x.accounts.join(", ") }], r.holdings));
+      h("div", { class: "note" }, "This tab shows what you own and what changed, for the brokerages linked through SnapTrade. It is not your full net worth: SnapTrade may not have every account. The Net worth tab uses SimpleFIN for that."),
+      h("div", { class: "kpis" }, h("div", { class: "kpi" }, h("b", {}, usd(total)), h("span", {}, "In linked brokerages")), h("div", { class: "kpi" }, h("b", {}, r.holdings.length), h("span", {}, "Positions")), h("div", { class: "kpi" }, h("b", {}, r.accounts.length), h("span", {}, "Accounts"))),
+      h("h2", {}, "Positions"), r.holdings.length ? table([{ label: "Symbol", render: (x) => h("button", { class: "linkish", title: "Show history", onclick: () => pick(x.symbol) }, x.symbol) }, { label: "Description", key: "description" }, { label: "Units", num: 1, render: (x) => units(x.units) }, { label: "Value", num: 1, render: (x) => usd(x.value, 2) }, { label: "Share", num: 1, render: (x) => (grand ? ((x.value / grand) * 100).toFixed(1) + "%" : "") }, { label: "Accounts", render: (x) => x.accounts.join(", ") }], r.holdings) : h("div", { class: "mute" }, "No positions yet. Connect a brokerage, then refresh."), histBox,
+      h("h2", {}, "Bought and sold"), r.activity && r.activity.length ? table([{ label: "Date", key: "date" }, { label: "What", render: (x) => h("span", { class: x.what === "Sold" || x.what === "Closed" ? "down" : "up" }, x.what) }, { label: "Symbol", key: "symbol" }, { label: "Account", key: "account" }, { label: "Units", num: 1, render: (x) => (x.change > 0 ? "+" : "") + units(x.change) }, { label: "About", num: 1, tip: "Units changed times the price on the day you saw it. A guide, not the exact trade price.", render: (x) => usd(Math.abs(x.approxValue), 0) }], r.activity, { maxRows: 200 }) : h("div", { class: "mute" }, "Nothing yet. Changes appear when a snapshot differs from the one before it, so the list starts after your second day of snapshots. Buys and sells between two snapshots show as one net change."),
+      h("h2", {}, "Linked accounts over time"), r.series.length ? historyChart(r.series) : h("div", { class: "mute" }, "No snapshots yet."),
+      h("h2", {}, "Accounts"), table([{ label: "Account", key: "name" }, { label: "Institution", key: "institution" }, { label: "As of", key: "date" }, { label: "Balance", num: 1, render: (x) => usd(x.balance, 2) }, { label: "Cash", num: 1, render: (x) => usd(x.cash, 2) }], r.accounts));
   }
   refresh.addEventListener("click", async () => { refresh.disabled = true; try { const r = await api("/api/investments/refresh", { body: {} }); await load(); out.prepend(h("div", { class: "mute" }, `Recorded ${r.recorded} account(s) for ${r.date}.`)); } catch (e) { out.prepend(h("div", { class: "err" }, e.message)); } finally { refresh.disabled = false; } });
   connect.addEventListener("click", async () => { try { const r = await api("/api/snaptrade/connect"); window.open(r.url, "_blank", "noopener"); } catch (e) { out.prepend(h("div", { class: "err" }, e.message)); } });
@@ -588,6 +592,31 @@ function investTab() {
     ],
     extra: () => h("div", {}, snapStatus, h("div", { class: "row actions" }, shapeBtn, h("span", { class: "mute" }, "Diagnostic: shows the names and types of fields SnapTrade returns (no balances or account numbers), useful if a brokerage looks wrong."))) });
   root.append(strategyBox(false), h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept. A snapshot is also taken automatically each night; see Settings."))), shapeBox, out);
+  load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
+}
+
+// ---------- Net worth ----------
+function networthTab() {
+  const root = $("networth"), out = h("div"), refresh = h("button", { class: "act" }, "Refresh from SimpleFIN");
+  async function load() {
+    const r = await api("/api/networth");
+    const setKind = async (ids, kind) => { await api("/api/networth/kinds", { body: { ids, kind } }); await load(); };
+    const kindSel = (a) => { const sel = h("select", { "aria-label": `Type for ${a.name}` }, Object.entries(r.kinds).map(([k, l]) => h("option", { value: k, selected: k === a.kind }, l))); sel.addEventListener("change", () => setKind([a.id], sel.value)); return sel; };
+    const keep = r.accounts.filter((a) => !a.confirmed);
+    fill(out,
+      !r.configured ? h("div", { class: "warn" }, "SimpleFIN is not configured. Set SIMPLEFIN_ACCESS_URL (see README).") : null,
+      !r.accounts.length ? h("div", { class: "mute" }, "No balances yet. Press Refresh from SimpleFIN; after that a snapshot is saved every night.") : null,
+      r.accounts.length ? [
+        h("div", { class: "kpis" }, h("div", { class: "kpi" }, h("b", {}, usd(r.netWorth)), h("span", {}, "Net worth")), h("div", { class: "kpi" }, h("b", {}, usd(r.assets)), h("span", {}, "Assets")), h("div", { class: "kpi" }, h("b", { class: r.debts < 0 ? "down" : "" }, usd(r.debts)), h("span", {}, "Debts"))),
+        r.unconfirmed ? h("div", { class: "note" }, `${r.unconfirmed} account${r.unconfirmed === 1 ? " is" : "s are"} using a guessed type. Check the Type column below. Mark duplicates, and any account that mirrors your home or a vehicle, as Ignore so nothing is counted twice.`, keep.length ? h("div", { class: "row actions" }, h("button", { class: "alt", onclick: async () => { for (const a of keep) await api("/api/networth/kinds", { body: { id: a.id, kind: a.kind } }); await load(); } }, "Accept all guesses")) : null) : null,
+        r.series.length > 1 ? historyChart(r.series) : h("div", { class: "mute" }, "The chart appears after the second day of snapshots."),
+        h("h2", {}, "Summary"), table([{ label: "Group", key: "name" }, { label: "Total", num: 1, render: (g) => h("span", { class: g.total < 0 ? "down" : "" }, usd(g.total)) }], r.groups),
+        h("h2", {}, "Accounts"), table([{ label: "Account", render: (a) => h("span", {}, a.name, a.org ? h("small", { class: "mute" }, " " + a.org) : null) }, { label: "As of", key: "date" }, { label: "Balance", num: 1, render: (a) => usd(a.balance, 2) }, { label: "Counts as", num: 1, render: (a) => usd(a.counted, 2) }, { label: "Type", render: (a) => h("span", {}, kindSel(a), a.confirmed ? "" : h("small", { class: "mute" }, " (guess)")) }], r.accounts),
+      ] : null,
+      h("div", { class: "mute" }, "Home, vehicle and camper values come from the Assets tab. Credit cards and loans always count as debts, whichever sign your bank uses. Nothing here is written to Actual."));
+  }
+  refresh.addEventListener("click", async () => { refresh.disabled = true; try { const x = await api("/api/networth/refresh", { body: {} }); await load(); out.prepend(h("div", { class: "mute" }, `Saved ${x.accounts} account balance(s) for ${x.date}.` + (x.errors.length ? " SimpleFIN said: " + x.errors.join("; ") : ""))); } catch (e) { out.prepend(h("div", { class: "err" }, e.message)); } finally { refresh.disabled = false; } });
+  root.append(strategyBox(false), h("div", { class: "card" }, h("div", { class: "row" }, refresh, h("span", { class: "mute" }, "Balances are read from SimpleFIN and stored by this app (one per account per day, plus a nightly snapshot)."))), out);
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
 
@@ -835,13 +864,13 @@ function actualCheck() {
 
 // ---------- how Invest, Assets and Actual fit together ----------
 const STRATEGY = [
-  ["Actual", "Day-to-day money: checking, savings, credit cards, your mortgage and loans, and your budget. The companion only reads it (and, if you press Apply, adds notes or categories to Venmo and Amazon transactions). It never changes balances."],
-  ["Invest tab", "Brokerage balances read from SnapTrade (read-only) and saved here as a snapshot every night, so you get a history without keeping those accounts in Actual. If you do keep investment accounts in Actual as off-budget accounts, money you move into them counts as 'to investments / debt' in the Loan planner."],
+  ["Net worth tab", "The total picture. SimpleFIN has all your accounts, so its balances are saved here every night. You tell the app what each account is (cash, investment, credit card, loan), and the home, vehicles and camper from the Assets tab are added. Debts always count as negative."],
+  ["Invest tab", "A stock dashboard for the brokerages linked through SnapTrade: what you hold, how each position moved, and what you bought or sold (worked out by comparing nightly snapshots). SnapTrade does not have every account, so this is not the net worth."],
   ["Assets tab", "Things with no bank feed: your home, vehicles and camper. Values are typed in (a monthly reminder asks), estimated from a price index or depreciation, or taken from an Actual account if you track the asset there."],
-  ["Loan planner", "Reads cash, income, spending and your mortgage balance from Actual, and the home value from an Actual account or custom value. It does not yet use the Assets tab's home value automatically."],
-  ["Net worth", "Investments (Invest) + assets (Assets) + cash (Actual) - debts (Actual). A combined net-worth page is not built yet."],
+  ["Actual", "Day-to-day money and the budget. The companion only reads it (and, if you press Apply, adds notes or categories to Venmo and Amazon transactions). Actual is not used for net worth, so you do not need your investment accounts in it."],
+  ["Loan planner", "Reads cash, income, spending and your mortgage balance from Actual. If you stop keeping investment accounts in Actual, transfers to them still count as money going to investments. It does not yet use the Assets tab's home value automatically."],
 ];
-const strategyBox = (open = false) => h("details", { class: "strategy", open }, h("summary", {}, "How Invest, Assets and Actual fit together"), h("dl", {}, STRATEGY.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])));
+const strategyBox = (open = false) => h("details", { class: "strategy", open }, h("summary", {}, "How Net worth, Invest, Assets and Actual fit together"), h("dl", {}, STRATEGY.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])));
 (function tabHoverStrategy() { // hover a tab for about a second and a half to see the strategy; leave to hide it
   const box = h("div", { id: "stratbox", role: "tooltip", hidden: true }); document.body.append(box);
   let t = null;
@@ -849,8 +878,8 @@ const strategyBox = (open = false) => h("details", { class: "strategy", open }, 
   document.addEventListener("mouseover", (e) => {
     if (!matchMedia("(hover: hover)").matches) return;
     const b = e.target.closest && e.target.closest("#tabs button");
-    clearTimeout(t); if (!b || !["invest", "assets"].includes(b.dataset.tab)) { box.hidden = true; return; }
-    t = setTimeout(() => { fill(box, h("b", {}, "How Invest, Assets and Actual fit together"), STRATEGY.map(([k, v]) => h("p", {}, h("b", {}, k + ": "), v))); box.hidden = false; const r = b.getBoundingClientRect(); box.style.left = Math.min(Math.max(8, r.left), innerWidth - box.offsetWidth - 8) + "px"; box.style.top = r.bottom + 8 + "px"; }, 1500);
+    clearTimeout(t); if (!b || !["invest", "networth", "assets"].includes(b.dataset.tab)) { box.hidden = true; return; }
+    t = setTimeout(() => { fill(box, h("b", {}, "How Net worth, Invest, Assets and Actual fit together"), STRATEGY.map(([k, v]) => h("p", {}, h("b", {}, k + ": "), v))); box.hidden = false; const r = b.getBoundingClientRect(); box.style.left = Math.min(Math.max(8, r.left), innerWidth - box.offsetWidth - 8) + "px"; box.style.top = r.bottom + 8 + "px"; }, 1500);
   });
   document.addEventListener("mouseout", (e) => { if (!e.relatedTarget || !(e.relatedTarget.closest && e.relatedTarget.closest("#tabs button"))) hide(); });
   addEventListener("scroll", hide, { passive: true });
@@ -869,7 +898,7 @@ async function refreshReminder() {
 
 // ---------- shell ----------
 const loaded = {};
-const inits = { loan: loanTab, budget: budgetTab, invest: investTab, assets: assetsTab, simplefin: simplefinTab, venmo: venmoTab, amazon: amazonTab };
+const inits = { loan: loanTab, budget: budgetTab, invest: investTab, networth: networthTab, assets: assetsTab, simplefin: simplefinTab, venmo: venmoTab, amazon: amazonTab };
 async function show(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("main section").forEach((s) => (s.hidden = s.id !== name));

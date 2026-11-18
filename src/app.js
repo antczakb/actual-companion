@@ -5,12 +5,13 @@ import { payoffPlans } from "./lib/payoff.js";
 import { suggestBudget } from "./lib/suggest.js";
 import { parseVenmoCSV, matchVenmo } from "./lib/venmo.js";
 import { parseAmazonCSV, matchAmazon } from "./lib/amazon.js";
-import { getSimpleFIN, toTables } from "./lib/simplefin.js";
+import { getSimpleFIN, toTables, fetchSimpleFIN } from "./lib/simplefin.js";
 import { diagnoseUrl } from "./lib/diagnose.js";
 import { addMonths, currentMonth, lastDayOf } from "./lib/dates.js";
 import { computeEstimate } from "./lib/estimate.js";
 import { planExistingLoan } from "./lib/existing.js";
 import { monthsBetween } from "./lib/flows.js";
+import { balancesFromSimpleFIN, KINDS, KIND_LABEL } from "./lib/networth.js";
 import { ASSET_TYPES } from "./lib/assets.js";
 import { extractValue, parseWatchId } from "./adapters/changedetection.js";
 import { localDate } from "./lib/schedule.js";
@@ -19,7 +20,7 @@ const httpErr = (status, message) => Object.assign(new Error(message), { status 
 const num = (v) => (v === undefined || v === "" || v === null ? null : Number.isFinite(+v) ? +v : null);
 
 export function createHandlers(d) {
-  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, snapshotState, changedetection, fred, notify, version, now = () => new Date() } = d;
+  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, balances, snapshotState, changedetection, fred, notify, version, now = () => new Date() } = d;
   const month0 = () => currentMonth(now());
   const today = () => localDate(now());
 
@@ -105,6 +106,15 @@ export function createHandlers(d) {
   }
 
   const routes = {
+    "GET /api/networth": async () => ({ configured: !!simplefin.accessUrl, kinds: KIND_LABEL, ...balances.view(settings.get().networth.kinds, assets.view(today()).series) }),
+    "POST /api/networth/refresh": async () => recordSimpleFINBalances(),
+    "POST /api/networth/kinds": async ({ body }) => {
+      const ids = body?.ids || (body?.id ? [body.id] : []);
+      if (!KINDS.includes(body?.kind)) throw httpErr(400, `Kind must be one of: ${KINDS.join(", ")}.`);
+      const s = settings.get(); for (const id of ids) s.networth.kinds[String(id)] = body.kind;
+      settings.set(s); return { ok: true };
+    },
+
     "GET /api/reminders": async () => { const R = settings.get().reminders; const items = R.enabled ? assets.due(today(), R.day) : []; return { enabled: R.enabled, day: R.day, count: items.length, items }; },
 
     "GET /api/status": async () => ({
@@ -162,7 +172,7 @@ export function createHandlers(d) {
 
     "GET /api/investments": async () => ({
       configured: !!snaptrade?.configured(), connected: !!snaptrade?.connected?.(),
-      accounts: store.latest(), series: store.series(), holdings: store.holdings(),
+      accounts: store.latest(), series: store.series(), holdings: store.holdings(), ...(store.positionsHistory ? store.positionsHistory() : { activity: [], positions: [] }),
     }),
     "POST /api/investments/refresh": async () => {
       if (!snaptrade?.configured()) throw httpErr(400, "SnapTrade is not configured (set SNAPTRADE_CLIENT_ID and SNAPTRADE_CONSUMER_KEY).");
@@ -280,6 +290,15 @@ export function createHandlers(d) {
     } catch (e) { return { ok: false, message: e.message }; }
   }
 
+  // Account balances from SimpleFIN for net worth (no cache, today only, so the SimpleFIN tab's cached history is untouched).
+  async function recordSimpleFINBalances() {
+    if (!simplefin.accessUrl) throw httpErr(400, "SimpleFIN is not configured (set SIMPLEFIN_ACCESS_URL).");
+    const date = today(), data = await fetchSimpleFIN({ accessUrl: simplefin.accessUrl, startDate: date, endDate: date, pending: false, fetchImpl: simplefin.fetchImpl || fetch });
+    const accts = balancesFromSimpleFIN(data);
+    balances.record(date, accts);
+    return { date, accounts: accts.length, errors: data.errors || [] };
+  }
+
   // End-of-day snapshot: investment balances from SnapTrade, plus today's balance for assets linked to an Actual account.
   async function runSnapshot() {
     const date = today(), out = { date, investments: 0, assets: 0, notes: [] };
@@ -293,6 +312,10 @@ export function createHandlers(d) {
         const items = assets.due(date, R.day);
         if (items.length) { try { await notify.send("Update your asset values", `Time to check: ${items.map((x) => x.name).join(", ")}. Open the Assets tab for the Zillow, Redfin and KBB links.`); out.notes.push("Sent the monthly value reminder."); } catch (e) { out.notes.push(`Reminder push failed: ${e.message}`); } }
       }
+    }
+    if (simplefin.accessUrl && balances) {
+      try { const r = await recordSimpleFINBalances(); out.netWorthAccounts = r.accounts; if (r.errors?.length) out.notes.push(`SimpleFIN: ${r.errors.join("; ")}`); }
+      catch (e) { out.notes.push(`SimpleFIN balances: ${e.message}`); }
     }
     for (const a of assets.list().filter((x) => x.watchId)) { const r = await fetchWatchedValue(a); out.notes.push(`${a.name}: ${r.message}`); if (r.ok && r.recorded) out.assets++; }
     for (const a of assets.list().filter((x) => x.estimate && !x.actualAccount && !x.watchId)) { const r = await recordEstimate(a, { onlyIfStale: true }); if (r.recorded || !r.ok) out.notes.push(`${a.name}: ${r.message}`); if (r.recorded) out.assets++; }

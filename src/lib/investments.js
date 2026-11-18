@@ -29,6 +29,31 @@ export class SnapshotStore {
       return { date: d, total: parts.reduce((a, b) => a + b.balance, 0), parts };
     });
   }
+  // Positions over time and what changed between snapshots (bought / sold / opened / closed), from stored snapshots.
+  // Per account first, so moving shares between accounts is not mistaken for a trade of the whole portfolio.
+  positionsHistory() {
+    const byAcct = new Map();
+    for (const s of this.data.snapshots) { const k = `${s.source}:${s.accountId}`; if (!byAcct.has(k)) byAcct.set(k, []); byAcct.get(k).push(s); }
+    const activity = [], perSymbol = new Map(); // symbol -> Map(date -> {units, value})
+    const key = (h) => h.symbol || h.description || "?";
+    for (const snaps of byAcct.values()) {
+      let prev = null;
+      for (const s of snaps) {
+        const cur = new Map(); for (const h of s.holdings || []) { const k = key(h), e = cur.get(k) || { units: 0, value: 0, price: h.price || 0, description: h.description || "" }; e.units += h.units || 0; e.value += h.value || 0; cur.set(k, e); }
+        for (const [k, e] of cur) { if (!perSymbol.has(k)) perSymbol.set(k, { description: e.description, dates: new Map() }); const d = perSymbol.get(k).dates; const x = d.get(s.date) || { units: 0, value: 0 }; x.units += e.units; x.value += e.value; d.set(s.date, x); }
+        if (prev) for (const k of new Set([...prev.keys(), ...cur.keys()])) {
+          const a = prev.get(k)?.units || 0, b = cur.get(k)?.units || 0, d = b - a;
+          if (Math.abs(d) < 1e-6) continue;
+          const price = cur.get(k)?.price || prev.get(k)?.price || 0;
+          activity.push({ date: s.date, symbol: k, account: s.name, change: d, price, approxValue: d * price, what: a === 0 ? "Opened" : b === 0 ? "Closed" : d > 0 ? "Bought" : "Sold" });
+        }
+        prev = cur;
+      }
+    }
+    activity.sort((x, y) => y.date.localeCompare(x.date) || x.symbol.localeCompare(y.symbol));
+    const positions = [...perSymbol].map(([symbol, p]) => ({ symbol, description: p.description, history: [...p.dates].sort((x, y) => x[0].localeCompare(y[0])).map(([date, v]) => ({ date, units: v.units, value: Math.round(v.value * 100) / 100 })) }));
+    return { activity, positions };
+  }
   holdings() {
     const m = new Map();
     for (const a of this.latest()) for (const h of a.holdings || []) {

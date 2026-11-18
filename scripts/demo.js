@@ -6,6 +6,7 @@ import { createHandlers } from "../src/app.js";
 import { createServer } from "../src/server.js";
 import { SettingsStore } from "../src/config.js";
 import { SnapshotStore } from "../src/lib/investments.js";
+import { BalanceStore } from "../src/lib/networth.js";
 import { AssetStore } from "../src/lib/assets.js";
 import { SnapshotState } from "../src/lib/schedule.js";
 import { ScenarioStore } from "../src/lib/scenarios.js";
@@ -33,6 +34,7 @@ const actual = new FakeActual({
 });
 const settings = new SettingsStore(path.join(dir, "settings.json"));
 const s = settings.get(); 
+s.networth.kinds = { S7: "ignore" };
 s.amazon.keywordCategories = { filter: "Mortgage", "dog food": "Groceries", gift: "Gifts" };
 s.projection.existingLoans = [{ name: "Truck loan", balanceAccount: null, balance: 21500, rate: 0.069, payment: 480, payoffMonth: ym(-8), payoffAmount: null, paymentInSpending: true }];
 s.projection.jobLoss = { enabled: true, startMonth: ym(-4), months: 8, incomePct: 0.25, severance: 8000, expenseCutPct: 10, pauseInvesting: true };
@@ -43,14 +45,19 @@ const sample = { errors: [], accounts: [{ org: { name: "Demo Bank", domain: "dem
   transactions: [{ id: "T1", posted: Math.floor(Date.now() / 1000) - 86400, amount: "-45.00", description: "VENMO PAYMENT 99", extra: { category: "transfer" } }, { id: "T2", posted: 0, amount: "-9.99", description: "PENDING", pending: true }] }] };
 const invStore = new SnapshotStore(path.join(dir, "inv.json"));
 { let ira = 52000, brk = 18000; for (let k = 14; k >= 0; k--) { const d = new Date(now.getTime() - k * 14 * 864e5).toISOString().slice(0, 10); ira = ira * (1 + Math.sin(k * 1.7) * 0.02 + 0.006) + 400; brk = brk * (1 + Math.cos(k * 1.3) * 0.025 + 0.004);
-  invStore.record(d, [{ accountId: "ira", name: "Roth IRA", institution: "Demo Brokerage", balance: Math.round(ira), cash: 200, holdings: [] }, { accountId: "brk", name: "Taxable", institution: "Demo Brokerage", balance: Math.round(brk), cash: 50, holdings: [] }]); } }
+  const px = (base, a) => Math.round(base * (1 + Math.sin(k * a) * 0.04) * 100) / 100, hd = (symbol, description, units, price) => ({ symbol, description, units, price, value: Math.round(units * price * 100) / 100 });
+  const vti = 120 + (k < 9 ? 6 : 0) + (k < 3 ? 4 : 0), vxus = k < 6 ? 90 : 70, aapl = k < 11 ? 25 : 0, nvda = k > 4 ? 30 : 12;
+  invStore.record(d, [{ accountId: "ira", name: "Roth IRA", institution: "Demo Brokerage", balance: Math.round(ira), cash: 200, holdings: [hd("VTI", "Vanguard Total Stock Market ETF", vti, px(280, 1.1)), hd("VXUS", "Vanguard Total International ETF", vxus, px(62, 0.9))] }, { accountId: "brk", name: "Taxable", institution: "Demo Brokerage", balance: Math.round(brk), cash: 50, holdings: [hd("AAPL", "Apple Inc.", aapl, px(225, 1.3)), hd("NVDA", "NVIDIA Corp.", nvda, px(140, 0.7))].filter((x) => x.units > 0) }]); } }
+const balances = new BalanceStore(path.join(dir, "balances.json"));
+{ for (let k = 40; k >= 0; k -= 5) { const d = new Date(now.getTime() - k * 864e5).toISOString().slice(0, 10), w = Math.sin(k) * 400;
+  balances.record(d, [{ id: "S1", name: "Everyday Checking", org: "Demo Bank", balance: 8200 + w }, { id: "S2", name: "High-yield Savings", org: "Demo Bank", balance: 31000 + (40 - k) * 60 }, { id: "S3", name: "Roth IRA", org: "Demo Brokerage", balance: 52000 + (40 - k) * 150 }, { id: "S4", name: "Taxable Brokerage", org: "Demo Brokerage", balance: 18000 + (40 - k) * 90 }, { id: "S5", name: "Rewards Visa card", org: "Demo Card", balance: -(2100 + w) }, { id: "S6", name: "Home Mortgage", org: "Demo Lender", balance: -(288000 - (40 - k) * 40) }, { id: "S7", name: "Primary home (mirror)", org: "Demo Bank", balance: 640000 }]); } }
 const assets = new AssetStore(path.join(dir, "assets.json"));
 { const home = assets.upsert({ name: "Primary home", type: "home", actualAccount: "House" }), car = assets.upsert({ name: "2021 Tacoma", type: "vehicle" }), rv = assets.upsert({ name: "Travel camper", type: "camper" });
   const d = (k) => new Date(Date.now() - k * 864e5).toISOString().slice(0, 10);
   [[300, 600000], [200, 615000], [100, 628000], [10, 640000]].forEach(([k, v]) => assets.setValue(home.id, { date: d(k), value: v }));
   [[330, 34000], [150, 31500], [20, 30200]].forEach(([k, v]) => assets.setValue(car.id, { date: d(k), value: v, note: "KBB trade-in" }));
   [[400, 42000], [120, 38500]].forEach(([k, v]) => assets.setValue(rv.id, { date: d(k), value: v })); }
-const handlers = createHandlers({ version: JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version, assets, snapshotState: new SnapshotState(path.join(dir, "st.json")), actual, snaptrade: null, store: invStore, settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
+const handlers = createHandlers({ balances, version: JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version, assets, snapshotState: new SnapshotState(path.join(dir, "st.json")), actual, snaptrade: null, store: invStore, settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
   simplefin: { accessUrl: "http://demo:demo@127.0.0.1/simplefin", fetchImpl: async () => ({ ok: true, json: async () => sample }) } });
 const port = +process.env.PORT || 3100;
 createServer({ handlers, password: null }).listen(port, "127.0.0.1", () => console.log(`Demo (made-up data) on http://127.0.0.1:${port}`));

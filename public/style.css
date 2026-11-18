@@ -179,3 +179,5 @@ label.chk i { width:14px; height:3px; border-radius:2px; display:inline-block; }
 details.strategy { margin:8px 0 12px; } details.strategy summary { cursor:pointer; color:var(--accent, #1f5fbf); }
 details.strategy dt { font-weight:600; margin-top:8px; } details.strategy dd { margin:2px 0 0; }
 a.btnlink { display:inline-block; padding:6px 12px; border:1px solid var(--accent, #1f5fbf); border-radius:8px; text-decoration:none; color:var(--accent, #1f5fbf); font-size:.9rem; }
+button.linkish { background:none; border:0; padding:0; color:var(--accent, #1f5fbf); font:inherit; font-weight:600; text-decoration:underline; cursor:pointer; min-height:0; }
+.up { color:#1a7f37; } .down { color:#c0362c; }
