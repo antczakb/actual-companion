@@ -93,7 +93,10 @@ export function createHandlers(d) {
           return { lowestCash: Math.round(min[key]), lowestMonth: min.label, firstNegativeMonth: neg >= 0 ? rows[neg].label : null, runwayMonths: neg >= 0 && startIdx >= 0 ? Math.max(0, neg - startIdx) : null, monthsBelowReserve: below };
         };
         const fromJob = startIdx >= 0 ? sr.rows.slice(startIdx) : [];
-        stress = { scenario: J, startMonthInHorizon: startIdx >= 0, loan: used, noLoan: stat(fromJob, "cash"), withLoan: used ? stat(fromJob, "cashWithLoan") : null,
+        // Cash that must already be set aside when the job loss starts so cash never drops below zero (no new loan).
+        const before = startIdx > 0 ? sr.rows[startIdx - 1].cash : cash0, drain = fromJob.length ? Math.max(0, before - Math.min(...fromJob.map((r) => r.cash))) : 0;
+        const baseRows = startIdx >= 0 ? result.rows.slice(startIdx) : [];
+        stress = { scenario: J, startMonthInHorizon: startIdx >= 0, loan: used, baseNoLoan: stat(baseRows, "cash"), baseWithLoan: used ? stat(baseRows, "cashWithLoan") : null, reserveNeeded: { amount: Math.round(drain), months: expenses > 0 ? Math.round((drain / expenses) * 10) / 10 : null, currentMonths: +P.reserveMonths || 0 }, noLoan: stat(fromJob, "cash"), withLoan: used ? stat(fromJob, "cashWithLoan") : null,
           rows: sr.rows.map((r) => ({ label: r.label, cash: Math.round(r.cash), cashWithLoan: Math.round(r.cashWithLoan), reserve: Math.round(r.reserve), jobLoss: !!sm.find((m) => m.label === r.label)?.jobLoss })) };
         if (startIdx < 0) warnings.push("The job-loss start month is outside the look-ahead window, so the stress test shows nothing. Move it earlier or look ahead further.");
       }

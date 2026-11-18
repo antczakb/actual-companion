@@ -84,3 +84,10 @@ test("runSnapshot also records SimpleFIN balances", async () => {
   await h.runSnapshot();
   assert.equal(balances.latest().length, 2);
 });
+
+test("assets count toward net worth even before any SimpleFIN balances", () => {
+  const v = new BalanceStore(path.join(tmp(), "b.json")).view({}, [{ date: "2026-10-01", total: 700000, parts: [] }]);
+  assert.equal(v.netWorth, 700000);
+  assert.equal(v.groups[0].name, "Home, vehicles, camper");
+  assert.equal(v.series.length, 1);
+});

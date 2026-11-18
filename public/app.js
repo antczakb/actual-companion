@@ -167,17 +167,29 @@ function existingSection(r) {
     { label: "Payments avoided", num: 1, render: (x) => (Number.isFinite(x.monthsOfPaymentsAvoided) ? x.monthsOfPaymentsAvoided + " mo" : "never ends") }, { label: "Interest avoided", num: 1, render: (x) => (x.interestAvoided == null ? "n/a" : usd(x.interestAvoided)) },
   ], r.existing), h("div", { class: "mute note" }, "The payoff amount is included in the cash projection and in sizing a new loan. Paying it off removes the monthly payment from the payoff month on.")];
 }
-function stressSection(r) {
-  const st = r.stress; if (!st || !st.startMonthInHorizon) return null;
-  const J = st.scenario, one = (s) => s && [s.lowestCash < 0 ? h("b", { class: "down" }, usd(s.lowestCash)) : usd(s.lowestCash), s.lowestMonth, s.firstNegativeMonth ? `${s.firstNegativeMonth} (${s.runwayMonths} mo in)` : "never", String(s.monthsBelowReserve)];
-  const rows = [["No new loan", one(st.noLoan)], st.withLoan ? [`With the ${usd(st.loan)} loan`, one(st.withLoan)] : null].filter((x) => x[1]);
-  const worst = st.withLoan || st.noLoan;
-  const verdict = worst.firstNegativeMonth ? `Cash would run out in ${worst.firstNegativeMonth}, ${worst.runwayMonths} month(s) after the job loss${st.withLoan ? " even with the loan" : ""}.` : `Cash stays above zero through the whole window (lowest ${usd(worst.lowestCash)} in ${worst.lowestMonth})${worst.monthsBelowReserve ? `, but it spends ${worst.monthsBelowReserve} month(s) below your reserve target` : ""}.`;
-  const out = st.rows, labels = out.map((x) => x.label);
-  return [stepH(null, `Job loss stress test (from ${J.startMonth}, ${J.months ? J.months + " months" : "rest of window"})`, TIPS.jobloss),
-    h("div", { class: "verdict " + (worst.firstNegativeMonth ? "caution" : "ok") }, verdict),
-    table([{ label: "", render: (x) => h("b", {}, x[0]) }, { label: "Lowest cash", num: 1, render: (x) => x[1][0] }, { label: "In month", render: (x) => x[1][1] }, { label: "Cash runs out", render: (x) => x[1][2] }, { label: "Months under reserve", num: 1, render: (x) => x[1][3] }], rows),
-    lineChart([{ name: "Cash, normal", color: "#888", dash: true, values: r.rows.map((x) => x.cash) }, { name: "Cash, job loss, no loan", color: "#c0362c", values: out.map((x) => x.cash) }, ...(st.withLoan ? [{ name: "Cash, job loss, with loan", color: "#1f5fbf", values: out.map((x) => x.cashWithLoan) }] : []), { name: "Reserve target", color: "#c55a11", dash: true, values: out.map((x) => x.reserve) }], labels)];
+// Scenarios side by side (normal / job loss, with and without the loan). Click a column heading to show or hide its line.
+function stressSection(r, useReserve) {
+  const st = r.stress; if (!st || !st.startMonthInHorizon) return h("div", { class: "mute" }, "Turn on the job loss test under Inputs (and keep its start month inside the look-ahead window) to compare scenarios here.");
+  const J = st.scenario, loan = st.loan ? usd(st.loan) : null;
+  const cols = [
+    { key: "base", name: "Normal, no loan", color: "#888", dash: true, stat: st.baseNoLoan, values: r.rows.map((x) => x.cash) },
+    loan ? { key: "baseL", name: `Normal, with ${loan} loan`, color: "#1f5fbf", dash: true, stat: st.baseWithLoan, values: r.rows.map((x) => x.cashWithLoan) } : null,
+    { key: "jl", name: "Job loss, no loan", color: "#c0362c", stat: st.noLoan, values: st.rows.map((x) => x.cash) },
+    loan ? { key: "jlL", name: `Job loss, with ${loan} loan`, color: "#8a3ffc", stat: st.withLoan, values: st.rows.map((x) => x.cashWithLoan) } : null,
+  ].filter(Boolean);
+  const on = new Set(cols.filter((c) => c.key !== "baseL").map((c) => c.key)), chart = h("div"), heads = [];
+  const draw = () => { fill(chart, lineChart([...cols.filter((c) => on.has(c.key)).map((c) => ({ name: c.name, color: c.color, dash: c.dash, values: c.values })), { name: "Reserve target", color: "#c55a11", dash: true, values: st.rows.map((x) => x.reserve) }], st.rows.map((x) => x.label))); heads.forEach(([k, b]) => b.classList.toggle("off", !on.has(k))); };
+  const lowest = (c) => (c.stat.lowestCash < 0 ? h("b", { class: "down" }, usd(c.stat.lowestCash)) : usd(c.stat.lowestCash));
+  const rowsDef = [["Lowest cash", lowest], ["In month", (c) => c.stat.lowestMonth], ["Cash runs out", (c) => (c.stat.firstNegativeMonth ? h("b", { class: "down" }, `${c.stat.firstNegativeMonth} (${c.stat.runwayMonths} mo in)`) : "Never")], ["Months under reserve", (c) => String(c.stat.monthsBelowReserve)]];
+  const tbl = h("div", { class: "tablewrap" }, h("table", { class: "scen" },
+    h("thead", {}, h("tr", {}, h("th", {}, ""), cols.map((c) => { const b = h("button", { class: "colbtn", title: "Show or hide this line on the chart", onclick: () => { on.has(c.key) ? on.delete(c.key) : on.add(c.key); draw(); } }, h("i", { style: `background:${c.color}` }), c.name); heads.push([c.key, b]); return h("th", {}, b); }))),
+    h("tbody", {}, rowsDef.map(([label, fn]) => h("tr", {}, h("th", { scope: "row" }, label), cols.map((c) => h("td", { class: "n" }, c.stat ? fn(c) : "")))))));
+  const worst = st.withLoan || st.noLoan, rn = st.reserveNeeded;
+  const verdict = worst.firstNegativeMonth ? `With the job loss, cash would run out in ${worst.firstNegativeMonth}, ${worst.runwayMonths} month(s) after it starts${st.withLoan ? " even with the loan" : ""}.` : `With the job loss, cash stays above zero through the whole window (lowest ${usd(worst.lowestCash)} in ${worst.lowestMonth}).`;
+  const need = rn && rn.amount > 0 ? h("div", { class: "card reserve" }, h("div", {}, h("b", {}, `Reserve needed to get through this job loss: ${usd(rn.amount)}`), rn.months != null ? ` (about ${rn.months} months of your normal spending)` : "", h("div", { class: "mute" }, `That is how much cash must already be set aside when it starts so you never hit zero (no new loan). Your reserve setting is ${rn.currentMonths} month(s).`)),
+    rn.months != null && rn.months > rn.currentMonths ? h("button", { class: "alt", onclick: () => useReserve(Math.min(36, Math.ceil(rn.months * 2) / 2)) }, `Use ${Math.ceil(rn.months * 2) / 2} months as my reserve`) : h("span", { class: "ok" }, "Your reserve already covers it.")) : null;
+  draw();
+  return h("div", {}, h("div", { class: "mute note" }, `Job loss from ${J.startMonth}, ${J.months ? J.months + " months" : "rest of window"}, income ${Math.round(J.incomePct * 100)}% of normal.`), h("div", { class: "verdict " + (worst.firstNegativeMonth ? "caution" : "ok") }, verdict), tbl, h("div", { class: "mute note" }, "Click a column heading to show or hide its line."), chart, need);
 }
 // Cash chart for the selected loan. Checkboxes add the cash line for each payoff strategy (paying the loan off faster uses more cash).
 const PLAN_COLORS = ["#1c7a3d", "#8a3ffc", "#d12771", "#0b8a8a", "#b28600", "#6f4e37", "#111111"];
@@ -425,8 +437,8 @@ async function loanTab() {
     Object.assign(s.projection, { reserveMonths: +f.reserveMonths.value || 0, incomeOverride: numOrNull(f.income), expensesOverride: numOrNull(f.expenses), investingOverride: numOrNull(f.investing) });
     S = await api("/api/settings", { method: "PUT", body: s });
   }
-  async function calc(doSave = true) {
-    fill(msg);
+  async function calc(doSave = true, jump = true) {
+    fill(msg); if (jump) showPane("result");
     await busy(go, out, async () => {
       if (doSave) await save();
       const q = new URLSearchParams({ product: selected });
@@ -434,6 +446,8 @@ async function loanTab() {
       render(await api("/api/loan?" + q));
     });
   }
+  const payBox = h("div"), stressBox = h("div"), sumbar = h("div", { class: "sumbar", hidden: true });
+  async function useReserve(m) { f.reserveMonths.value = m; f.protect.value = "Y"; await calc(true, false); }
   function render(r) {
     const s = r.summary, a = r.assumptions, kp = (v, l, t) => h("div", { class: "kpi" }, h("b", {}, v), h("span", {}, l, t ? tip(t) : null));
     const rec = r.comparison.find((x) => x.recommended);
@@ -466,13 +480,15 @@ async function loanTab() {
         kp(usd(s.worstShortfall), "Worst gap without a loan", TIPS.worstGap), kp(usd(s.paymentInterestOnly) + " / " + usd(s.paymentRepayment), "Payment: interest-only / repay", TIPS.payment),
         kp(pct(s.paymentPctOfSurplus), "Highest payment vs. surplus", TIPS.pctSurplus), kp(pct(s.combinedLtv), "Combined LTV", TIPS.ltv)),
       cashChart(r),
-      existingSection(r),
-      payoffSection(r),
-      stressSection(r),
       stepH(null, "Month by month"),
       table([{ label: "Month", key: "label" }, { label: "Cash, no loan", num: 1, render: (x) => usd(x.cash) }, { label: "Bonuses", num: 1, render: (x) => (x.bonuses ? usd(x.bonuses) : "") }, { label: "Purchases", num: 1, render: (x) => usd(x.purchases) }, { label: "Reserve", num: 1, tip: "Reserve target = reserve months x that month's spending (or your fixed amount).", render: (x) => usd(x.reserve) },
         { label: "Cash, with loan", num: 1, tip: "Cash without the loan + (loan x (1 - fee % - payments so far per $1) - fixed fee).", render: (x) => usd(x.cashWithLoan) }, { label: "Loan payment", num: 1, render: (x) => usd(x.loanPayment) }, { label: "No loan", key: "statusNoLoan" }, { label: "With loan", key: "statusWithLoan" }], r.rows,
         { stack: false, rowClass: (x) => (x.statusWithLoan === "SHORTFALL" ? "bad" : "") }));
+    fill(payBox, existingSection(r), payoffSection(r) || h("div", { class: "mute" }, "No loan is being sized, so there is nothing to pay off yet."));
+    fill(stressBox, stressSection(r, useReserve));
+    const L = r.comparison.find((x) => x.name === s.product), pay = s.paymentRepayment || s.paymentInterestOnly;
+    fill(sumbar, h("button", { class: "sumin", onclick: () => showPane("result") }, h("span", { class: "sb-name" }, s.verdict.code === "none-needed" ? "No loan needed" : "Selected: " + s.product), s.verdict.code === "none-needed" ? null : [h("span", {}, "Borrow ", h("b", {}, usd(s.suggested))), h("span", {}, "Payment ", h("b", {}, s.paymentInterestOnly === s.paymentRepayment ? usd(pay) : usd(s.paymentInterestOnly) + " / " + usd(s.paymentRepayment))), L ? pill(L.verdict.code, VERDICT_LABEL) : null]));
+    sumbar.hidden = false; document.body.classList.add("has-sumbar");
   }
 
   function payoffSection(r) {
@@ -502,7 +518,7 @@ async function loanTab() {
   go.addEventListener("click", () => calc(true));
   const field = (label, el, hint, t) => h("label", {}, h("span", { class: "lbl" }, label, t ? tip(t) : null), el, hint ? h("small", { class: "mute" }, hint) : null);
   drawPurchases(); drawBonuses(); drawExisting(); drawProducts();
-  root.append(
+  const inputs = h("div", { class: "pane" },
     h("div", { class: "intro" }, h("b", {}, "Plan a large purchase."), " Blue boxes are inputs; everything else is calculated. Your cash, income and spending are read from Actual. Hover or tap the ", tip("Like this: an explanation of how the number is worked out."), " marks to see how each number is calculated."),
     stepH(1, "Planned large purchases", TIPS.purchases), h("div", { class: "card" }, pBox),
     h("h3", {}, "Expected bonuses ", tip(TIPS.bonuses)), h("div", { class: "card" }, bBox),
@@ -519,7 +535,13 @@ async function loanTab() {
       h("div", { class: "row fields" }, field("Job loss starts", jf.start), field("Months out of work (0 = rest of window)", jf.months), field("Income still coming in (% of normal)", jf.income, "partner pay, unemployment"), field("Severance after tax ($)", jf.sev), field("Spending cut (%)", jf.cut), h("label", { class: "check" }, jlPause, "Pause investing and debt transfers"))),
     h("div", { class: "row actions" }, go,
       h("details", { class: "more" }, h("summary", {}, "Try a specific amount or draw month"), h("div", { class: "row fields" }, field("Loan amount ($)", adv.loan), field("Draw month", adv.draw)))),
-    msg, out, scenBox, scenOut);
+    );
+  const panes = { inputs, result: h("div", { class: "pane" }, msg, out), payoff: h("div", { class: "pane" }, payBox), scenarios: h("div", { class: "pane" }, stepH(null, "Job loss scenarios", TIPS.jobloss), stressBox, scenBox, scenOut) };
+  const LABELS = { inputs: "Inputs", result: "Result", payoff: "Payoff", scenarios: "Scenarios" }, subnav = h("div", { class: "subnav", role: "tablist" });
+  function showPane(name) { Object.entries(panes).forEach(([k, el]) => (el.hidden = k !== name)); subnav.querySelectorAll("button").forEach((b) => { b.classList.toggle("on", b.dataset.pane === name); b.setAttribute("aria-selected", b.dataset.pane === name); }); window.scrollTo({ top: 0 }); }
+  Object.keys(panes).forEach((k) => subnav.append(h("button", { "data-pane": k, role: "tab", onclick: () => showPane(k) }, LABELS[k])));
+  root.append(subnav, ...Object.values(panes), sumbar);
+  showPane("inputs");
   drawScenarios().catch((e) => fill(scenBox, h("div", { class: "err" }, e.message)));
   if (purchases.length) calc(true); // saves too, so suggested accounts shown above are what the result uses
 }
@@ -605,13 +627,13 @@ function networthTab() {
     const keep = r.accounts.filter((a) => !a.confirmed);
     fill(out,
       !r.configured ? h("div", { class: "warn" }, "SimpleFIN is not configured. Set SIMPLEFIN_ACCESS_URL (see README).") : null,
-      !r.accounts.length ? h("div", { class: "mute" }, "No balances yet. Press Refresh from SimpleFIN; after that a snapshot is saved every night.") : null,
-      r.accounts.length ? [
+      !r.accounts.length ? h("div", { class: "mute" }, "No SimpleFIN balances yet. Press Refresh from SimpleFIN; after that a snapshot is saved every night. Values from the Assets tab are already included below.") : null,
+      (r.accounts.length || r.groups.length) ? [
         h("div", { class: "kpis" }, h("div", { class: "kpi" }, h("b", {}, usd(r.netWorth)), h("span", {}, "Net worth")), h("div", { class: "kpi" }, h("b", {}, usd(r.assets)), h("span", {}, "Assets")), h("div", { class: "kpi" }, h("b", { class: r.debts < 0 ? "down" : "" }, usd(r.debts)), h("span", {}, "Debts"))),
         r.unconfirmed ? h("div", { class: "note" }, `${r.unconfirmed} account${r.unconfirmed === 1 ? " is" : "s are"} using a guessed type. Check the Type column below. Mark duplicates, and any account that mirrors your home or a vehicle, as Ignore so nothing is counted twice.`, keep.length ? h("div", { class: "row actions" }, h("button", { class: "alt", onclick: async () => { for (const a of keep) await api("/api/networth/kinds", { body: { id: a.id, kind: a.kind } }); await load(); } }, "Accept all guesses")) : null) : null,
         r.series.length > 1 ? historyChart(r.series) : h("div", { class: "mute" }, "The chart appears after the second day of snapshots."),
         h("h2", {}, "Summary"), table([{ label: "Group", key: "name" }, { label: "Total", num: 1, render: (g) => h("span", { class: g.total < 0 ? "down" : "" }, usd(g.total)) }], r.groups),
-        h("h2", {}, "Accounts"), table([{ label: "Account", render: (a) => h("span", {}, a.name, a.org ? h("small", { class: "mute" }, " " + a.org) : null) }, { label: "As of", key: "date" }, { label: "Balance", num: 1, render: (a) => usd(a.balance, 2) }, { label: "Counts as", num: 1, render: (a) => usd(a.counted, 2) }, { label: "Type", render: (a) => h("span", {}, kindSel(a), a.confirmed ? "" : h("small", { class: "mute" }, " (guess)")) }], r.accounts),
+        r.accounts.length ? [h("h2", {}, "Accounts"), table([{ label: "Account", render: (a) => h("span", {}, a.name, a.org ? h("small", { class: "mute" }, " " + a.org) : null) }, { label: "As of", key: "date" }, { label: "Balance", num: 1, render: (a) => usd(a.balance, 2) }, { label: "Counts as", num: 1, render: (a) => usd(a.counted, 2) }, { label: "Type", render: (a) => h("span", {}, kindSel(a), a.confirmed ? "" : h("small", { class: "mute" }, " (guess)")) }], r.accounts)] : null,
       ] : null,
       h("div", { class: "mute" }, "Home, vehicle and camper values come from the Assets tab. Credit cards and loans always count as debts, whichever sign your bank uses. Nothing here is written to Actual."));
   }
@@ -870,7 +892,7 @@ const STRATEGY = [
   ["Actual", "Day-to-day money and the budget. The companion only reads it (and, if you press Apply, adds notes or categories to Venmo and Amazon transactions). Actual is not used for net worth, so you do not need your investment accounts in it."],
   ["Loan planner", "Reads cash, income, spending and your mortgage balance from Actual. If you stop keeping investment accounts in Actual, transfers to them still count as money going to investments. It does not yet use the Assets tab's home value automatically."],
 ];
-const strategyBox = (open = false) => h("details", { class: "strategy", open }, h("summary", {}, "How Net worth, Invest, Assets and Actual fit together"), h("dl", {}, STRATEGY.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])));
+const strategyBox = (open = false) => h("details", { class: "strategy", open }, h("summary", {}, "How Net worth, Invest, Assets and Actual fit together"), h("dl", {}, STRATEGY.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])));
 (function tabHoverStrategy() { // hover a tab for about a second and a half to see the strategy; leave to hide it
   const box = h("div", { id: "stratbox", role: "tooltip", hidden: true }); document.body.append(box);
   let t = null;
@@ -900,6 +922,7 @@ async function refreshReminder() {
 const loaded = {};
 const inits = { loan: loanTab, budget: budgetTab, invest: investTab, networth: networthTab, assets: assetsTab, simplefin: simplefinTab, venmo: venmoTab, amazon: amazonTab };
 async function show(name) {
+  document.body.dataset.tab = name;
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("main section").forEach((s) => (s.hidden = s.id !== name));
   if (!loaded[name]) { loaded[name] = true; try { await inits[name](); } catch (e) { $(name).append(h("div", { class: "err" }, e.message)); } }

@@ -161,3 +161,11 @@ The nightly job refreshes an estimate when the last one is a week old; "Estimate
 - **Net worth tab**: SimpleFIN balances for all your accounts are saved every night (and on "Refresh from SimpleFIN"). Each account gets a type (cash, investment, credit card, loan, other asset, ignore); the app guesses, you correct. Credit cards and loans always count as debts. Home, vehicle and camper values from the Assets tab are added. Mark any account that mirrors your house or a vehicle as Ignore to avoid double counting. Nothing is written to Actual.
 - **Invest tab** is now a stock dashboard for SnapTrade-linked brokerages: positions with share of portfolio, click a symbol for its value history, and a Bought/Sold list derived from differences between nightly snapshots (starts after the second snapshot; trades between snapshots appear as one net change).
 - New data file `balances.json` in the data directory.
+
+## v0.1.21: Loan tab layout, scenarios side by side, reserve figure
+
+- The Loan tab is split into **Inputs, Result, Payoff, Scenarios** so you scroll less. "Save and calculate" jumps to Result.
+- **Scenarios** shows Normal and Job loss, with and without the selected loan, side by side (lowest cash, month, when cash runs out, months under reserve). Click a column heading to show or hide its line on the chart.
+- **Reserve needed** for the job loss is the cash that must already be set aside when it starts so cash never hits zero (no new loan), also in months of spending, with a button to adopt it as your reserve.
+- A **summary bar at the bottom** (selected loan, borrow amount, payment, verdict) stays visible on the Loan tab; tap it to go to Result.
+- Fixes: the "How Net worth, Invest, Assets and Actual fit together" text showed as "[object ...]"; Assets values now count toward Net worth even before any SimpleFIN balances exist.
