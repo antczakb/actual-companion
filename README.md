@@ -148,3 +148,10 @@ In the Assets tab, edit an asset and choose **Estimate automatically**:
 - **Depreciation:** enter a known value, its date and a yearly percentage (cars often 10-15%, campers 8-10%). It ignores mileage and condition.
 
 The nightly job refreshes an estimate when the last one is a week old; "Estimate now" does it immediately. When you enter a real quote by hand, enter a new starting value as well so the estimate restarts from it.
+
+## Version, reminders, chart hover (v0.1.19)
+
+- The version shows at the top right of every page.
+- **Monthly value reminder:** a banner appears from the reminder day (Assets > Settings, default the 1st) for each home, vehicle or camper you have not updated by hand this month. Each asset card has quick links (Zillow and Redfin for a home, Kelley Blue Book for a vehicle) or one link you paste for your exact page. Assets linked to an Actual account are never flagged; an estimate does not count as updating. For a push as well, set `NOTIFY_URL` in `/etc/actual-companion.env` to an ntfy topic URL (or any service that accepts a plain-text POST); it is sent on the reminder day and every 7 days while something is still due.
+- Hover or tap any chart to see the values of every line at that point.
+- Hovering the Invest or Assets tab for about a second and a half shows how those tabs fit with Actual; each of those tabs also has the same text under a collapsible heading.

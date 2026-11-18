@@ -137,3 +137,40 @@ test("estimate recorded on demand and by the nightly job only when the last esti
   day = 24; const s2 = await h.runSnapshot(); assert.equal(s2.assets, 1);
   assert.equal(assets.view("2026-11-24").assets[0].values.length, 2);
 });
+
+import { NotifyAdapter } from "../src/adapters/notify.js";
+
+test("reminders: due until a value is entered by hand this month; Actual-linked and opted-out assets never due; day gate", async () => {
+  const dir = tmp(), assets = new AssetStore(path.join(dir, "a.json"));
+  const home = assets.upsert({ name: "House", type: "home", lookupUrl: "https://www.zillow.com/homedetails/x" }), car = assets.upsert({ name: "Car", type: "vehicle" });
+  assets.upsert({ name: "Linked", type: "home", actualAccount: "House" }); assets.upsert({ name: "Quiet", type: "other", remind: false });
+  assert.deepEqual(assets.due("2026-11-01", 1).map((x) => x.name).sort(), ["Car", "House"]);
+  assert.deepEqual(assets.due("2026-11-01", 5), [], "before the reminder day");
+  assets.setValue(home.id, { date: "2026-11-03", value: 600000 });
+  assets.setValue(car.id, { date: "2026-11-03", value: 30000, source: "estimate" }); // an estimate does not count as checking it
+  assert.deepEqual(assets.due("2026-11-10", 1).map((x) => x.name), ["Car"]);
+  assert.deepEqual(assets.due("2026-12-02", 1).map((x) => x.name).sort(), ["Car", "House"], "new month, due again");
+  assert.throws(() => assets.upsert({ id: home.id, name: "House", type: "home", lookupUrl: "javascript:alert(1)" }), /http/);
+  assert.equal(assets.list().find((a) => a.id === home.id).lookupUrl, "https://www.zillow.com/homedetails/x");
+});
+
+test("reminder push goes out on the reminder day and weekly after, only while something is due; status carries the version", async () => {
+  const dir = tmp(), assets = new AssetStore(path.join(dir, "a.json")), sent = [];
+  assets.upsert({ name: "House", type: "home" });
+  let day = 1;
+  const h = createHandlers({ actual: { getAccounts: async () => [], configured: () => true }, snaptrade: null, store: {}, settings: new SettingsStore(path.join(dir, "s.json")), scenarios: null, assets, snapshotState: null, simplefin: {}, version: "9.9.9",
+    notify: { configured: () => true, send: async (t, m) => sent.push([t, m]) }, now: () => new Date(2026, 10, day, 23, 55) });
+  assert.equal((await h["GET /api/status"]({})).version, "9.9.9");
+  assert.equal((await h["GET /api/reminders"]({})).count, 1);
+  await h.runSnapshot(); assert.equal(sent.length, 1); assert.match(sent[0][1], /House/);
+  day = 2; await h.runSnapshot(); assert.equal(sent.length, 1);
+  day = 8; await h.runSnapshot(); assert.equal(sent.length, 2, "weekly while still due");
+  assets.setValue(assets.list()[0].id, { date: "2026-11-15", value: 1 }); day = 15; await h.runSnapshot(); assert.equal(sent.length, 2, "nothing due, nothing sent");
+});
+
+test("notify adapter posts plain text with a title and reports failures", async () => {
+  let seen; const ok = new NotifyAdapter({ url: "https://ntfy.example/topic", fetchImpl: async (u, o) => { seen = [u, o]; return { ok: true }; } });
+  await ok.send("T", "Body"); assert.equal(seen[1].body, "Body"); assert.equal(seen[1].headers.Title, "T");
+  await assert.rejects(new NotifyAdapter({ url: "https://x", fetchImpl: async () => ({ ok: false, status: 500 }) }).send("a", "b"), /HTTP 500/);
+  assert.equal(new NotifyAdapter({ url: "ftp://x" }).configured(), false);
+});

@@ -161,3 +161,21 @@ label.chk { display:inline-flex !important; flex-direction:row !important; gap:6
 label.chk input { width:auto; margin:0; }
 label.chk i { width:14px; height:3px; border-radius:2px; display:inline-block; }
 .stackcell { display:flex; flex-direction:column; gap:4px; min-width:150px; } .stackcell > * { width:100%; box-sizing:border-box; }
+
+/* chart hover tooltip */
+.charttip { position:absolute; z-index:5; pointer-events:none; background:var(--card, #fff); color:inherit; border:1px solid var(--line, #ccd); border-radius:8px; padding:6px 9px; font-size:.82rem; box-shadow:0 4px 14px rgba(0,0,0,.18); width:max-content; max-width:92vw; }
+.charttip div { display:flex; gap:6px; align-items:center; white-space:nowrap; } .charttip div b { margin-left:auto; padding-left:10px; }
+.charttip i { width:10px; height:3px; border-radius:2px; display:inline-block; flex:none; }
+@media (prefers-color-scheme: dark) { .charttip { background:#1d2430; border-color:#3a4558; } }
+
+/* reminder banner, strategy box, links */
+#reminder { display:flex; gap:12px; align-items:center; justify-content:center; flex-wrap:wrap; padding:8px 16px; background:#fff4d6; color:#5a4300; border-bottom:1px solid #e8cf86; }
+@media (prefers-color-scheme: dark) { #reminder { background:#3a3012; color:#f3dfa2; border-color:#6b5a1f; } }
+#reminder[hidden] { display:none; }
+#ver { margin-left:8px; font-size:.75rem; opacity:.7; }
+#stratbox { position:fixed; z-index:50; max-width:min(440px, 92vw); background:var(--card, #fff); color:inherit; border:1px solid var(--line, #ccd); border-radius:10px; padding:10px 14px; box-shadow:0 8px 24px rgba(0,0,0,.22); font-size:.88rem; }
+#stratbox[hidden] { display:none; } #stratbox p { margin:6px 0; }
+@media (prefers-color-scheme: dark) { #stratbox { background:#1d2430; border-color:#3a4558; } }
+details.strategy { margin:8px 0 12px; } details.strategy summary { cursor:pointer; color:var(--accent, #1f5fbf); }
+details.strategy dt { font-weight:600; margin-top:8px; } details.strategy dd { margin:2px 0 0; }
+a.btnlink { display:inline-block; padding:6px 12px; border:1px solid var(--accent, #1f5fbf); border-radius:8px; text-decoration:none; color:var(--accent, #1f5fbf); font-size:.9rem; }

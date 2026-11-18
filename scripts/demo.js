@@ -50,7 +50,7 @@ const assets = new AssetStore(path.join(dir, "assets.json"));
   [[300, 600000], [200, 615000], [100, 628000], [10, 640000]].forEach(([k, v]) => assets.setValue(home.id, { date: d(k), value: v }));
   [[330, 34000], [150, 31500], [20, 30200]].forEach(([k, v]) => assets.setValue(car.id, { date: d(k), value: v, note: "KBB trade-in" }));
   [[400, 42000], [120, 38500]].forEach(([k, v]) => assets.setValue(rv.id, { date: d(k), value: v })); }
-const handlers = createHandlers({ assets, snapshotState: new SnapshotState(path.join(dir, "st.json")), actual, snaptrade: null, store: invStore, settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
+const handlers = createHandlers({ version: JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version, assets, snapshotState: new SnapshotState(path.join(dir, "st.json")), actual, snaptrade: null, store: invStore, settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
   simplefin: { accessUrl: "http://demo:demo@127.0.0.1/simplefin", fetchImpl: async () => ({ ok: true, json: async () => sample }) } });
 const port = +process.env.PORT || 3100;
 createServer({ handlers, password: null }).listen(port, "127.0.0.1", () => console.log(`Demo (made-up data) on http://127.0.0.1:${port}`));

@@ -19,7 +19,7 @@ const httpErr = (status, message) => Object.assign(new Error(message), { status 
 const num = (v) => (v === undefined || v === "" || v === null ? null : Number.isFinite(+v) ? +v : null);
 
 export function createHandlers(d) {
-  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, snapshotState, changedetection, fred, now = () => new Date() } = d;
+  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, snapshotState, changedetection, fred, notify, version, now = () => new Date() } = d;
   const month0 = () => currentMonth(now());
   const today = () => localDate(now());
 
@@ -105,7 +105,10 @@ export function createHandlers(d) {
   }
 
   const routes = {
+    "GET /api/reminders": async () => { const R = settings.get().reminders; const items = R.enabled ? assets.due(today(), R.day) : []; return { enabled: R.enabled, day: R.day, count: items.length, items }; },
+
     "GET /api/status": async () => ({
+      version: version || null,
       actual: actual.configured(), simplefin: !!simplefin.accessUrl, snaptrade: !!snaptrade?.configured(), snaptradeConnected: !!snaptrade?.connected?.(),
     }),
 
@@ -284,6 +287,13 @@ export function createHandlers(d) {
       try { const accts = await snaptrade.fetchAll(); if (accts.length) { store.record(date, accts); out.investments = accts.length; } else out.notes.push("SnapTrade returned no accounts."); }
       catch (e) { out.notes.push(`SnapTrade: ${e.message}`); }
     } else out.notes.push("SnapTrade not configured; investments skipped.");
+    { // monthly reminder push (banner is always shown in the app); repeats weekly while values are still due
+      const R = settings.get().reminders, day = +date.slice(8, 10);
+      if (R.enabled && notify?.configured() && day >= R.day && (day - R.day) % 7 === 0) {
+        const items = assets.due(date, R.day);
+        if (items.length) { try { await notify.send("Update your asset values", `Time to check: ${items.map((x) => x.name).join(", ")}. Open the Assets tab for the Zillow, Redfin and KBB links.`); out.notes.push("Sent the monthly value reminder."); } catch (e) { out.notes.push(`Reminder push failed: ${e.message}`); } }
+      }
+    }
     for (const a of assets.list().filter((x) => x.watchId)) { const r = await fetchWatchedValue(a); out.notes.push(`${a.name}: ${r.message}`); if (r.ok && r.recorded) out.assets++; }
     for (const a of assets.list().filter((x) => x.estimate && !x.actualAccount && !x.watchId)) { const r = await recordEstimate(a, { onlyIfStale: true }); if (r.recorded || !r.ok) out.notes.push(`${a.name}: ${r.message}`); if (r.recorded) out.assets++; }
     const linked = assets.list().filter((a) => a.actualAccount);

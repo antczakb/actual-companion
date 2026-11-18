@@ -56,6 +56,24 @@ function table(cols, rows, { rowClass, maxRows = 2000, stack } = {}) {
     h("tbody", {}, shown.map((r) => h("tr", { class: rowClass ? rowClass(r) : "" }, cols.map((c) => h("td", { class: c.num ? "n" : "", "data-label": c.label }, c.render ? c.render(r) : (r[c.key] ?? "")))))));
   return h("div", {}, h("div", { class: "tablewrap" + (st ? " stackwrap" : "") }, t), rows.length > maxRows ? h("div", { class: "mute" }, `Showing first ${maxRows} of ${rows.length} rows.`) : null);
 }
+// Hover/tap tooltip for charts: shows the label and every series' value at the nearest point. xs = pixel x of each point in viewBox units.
+function chartHover(wrap, svg, W, xs, rows, hi) {
+  const tipEl = h("div", { class: "charttip", hidden: true }), guide = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  guide.setAttribute("stroke", "currentColor"); guide.setAttribute("stroke-opacity", ".35"); guide.setAttribute("stroke-dasharray", "3 3"); guide.setAttribute("y1", hi.T); guide.setAttribute("y2", hi.bottom); guide.style.display = "none"; guide.style.pointerEvents = "none";
+  svg.append(guide); wrap.style.position = "relative"; wrap.append(tipEl);
+  const near = (ev) => { const r = svg.getBoundingClientRect(), x = ((ev.clientX - r.left) / r.width) * W; let b = 0, bd = Infinity; xs.forEach((px, i) => { const d = Math.abs(px - x); if (d < bd) { bd = d; b = i; } }); return { i: b, r }; };
+  const move = (ev) => {
+    const { i, r } = near(ev), row = rows(i);
+    guide.setAttribute("x1", xs[i]); guide.setAttribute("x2", xs[i]); guide.style.display = "";
+    fill(tipEl, h("b", {}, row.title), row.lines.map((l) => h("div", {}, h("i", { style: `background:${l.color}` }), h("span", {}, l.name), h("b", {}, l.value))));
+    tipEl.hidden = false;
+    const px = (xs[i] / W) * r.width, w = tipEl.offsetWidth; tipEl.style.left = Math.min(Math.max(0, px + 12), Math.max(0, r.width - w)) + "px"; tipEl.style.top = "8px";
+    if (px + 12 + w > r.width) tipEl.style.left = Math.max(0, px - w - 12) + "px";
+  };
+  const off = () => { tipEl.hidden = true; guide.style.display = "none"; };
+  svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", off);
+  svg.addEventListener("pointerup", (ev) => { if (ev.pointerType !== "mouse") setTimeout(off, 2500); });
+}
 function lineChart(series, labels, { money = true } = {}) {
   const W = 900, H = 260, L = 64, R = 12, T = 12, B = 26;
   const all = series.flatMap((s) => s.values).filter((v) => v != null);
@@ -73,7 +91,11 @@ function lineChart(series, labels, { money = true } = {}) {
     svg.append(el("polyline", { points: pts, fill: "none", stroke: s.color, "stroke-width": 2, ...(s.dash ? { "stroke-dasharray": "6 4" } : {}) }));
     if (labels.length === 1) svg.append(el("circle", { cx: X(0), cy: Y(s.values[0]), r: 4, fill: s.color }));
   }
-  return h("div", {}, svg, h("div", { class: "legend" }, series.map((s) => h("span", {}, h("i", { style: `background:${s.color}` }), s.name))));
+  const wrap = h("div", {}, svg, h("div", { class: "legend" }, series.map((s) => h("span", {}, h("i", { style: `background:${s.color}` }), s.name))));
+  const fmt = (v) => (v == null ? "n/a" : money ? usd(v) : String(Math.round(v * 100) / 100));
+  chartHover(wrap, svg, W, labels.map((_, i) => X(i)), (i) => ({ title: labels[i], lines: series.filter((s) => s.values[i] != null).map((s) => ({ name: s.name, color: s.color, value: fmt(s.values[i]) })) }), { T, bottom: H - B });
+  svg.style.touchAction = "pan-y";
+  return wrap;
 }
 // Interactive history chart: tap/click/hover (or use arrow keys / Prev / Next) to select a point and see its change
 // against the point before, the point after, and the first point. points: [{date, total, parts:[{name,balance}]}]
@@ -133,7 +155,9 @@ function historyChart(points) {
   prevB.addEventListener("click", () => select(sel - 1)); nextB.addEventListener("click", () => select(sel + 1));
   select(n - 1);
   const t = h("table", { class: "stack" }, h("thead", {}, h("tr", {}, ["Date", "Total", "Change vs previous", "Change since first"].map((c, k) => h("th", { class: k ? "n" : "" }, c)))), tbody);
-  return h("div", {}, h("div", { class: "mute" }, "Tap or hover the chart to pick a snapshot; the dashed rings are the snapshots before and after it."), svg, detail, h("h2", {}, "Snapshots over time"), h("div", { class: "tablewrap stackwrap" }, t));
+  const chartWrap = h("div", {}, svg);
+  chartHover(chartWrap, svg, W, points.map((_, i) => X(i)), (i) => ({ title: points[i].date, lines: [{ name: "Total", color: "#1f5fbf", value: usd(points[i].total) }] }), { T, bottom: H - B });
+  return h("div", {}, h("div", { class: "mute" }, "Tap or hover the chart to pick a snapshot; the dashed rings are the snapshots before and after it."), chartWrap, detail, h("h2", {}, "Snapshots over time"), h("div", { class: "tablewrap stackwrap" }, t));
 }
 function existingSection(r) {
   if (!r.existing?.length) return null;
@@ -563,7 +587,7 @@ function investTab() {
       { path: "snapshots.time", label: "Time of day (server clock)", type: "time", hint: "Default 23:55. Uses the time zone of the container; set it with timedatectl set-timezone if it is wrong." },
     ],
     extra: () => h("div", {}, snapStatus, h("div", { class: "row actions" }, shapeBtn, h("span", { class: "mute" }, "Diagnostic: shows the names and types of fields SnapTrade returns (no balances or account numbers), useful if a brokerage looks wrong."))) });
-  root.append(h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept. A snapshot is also taken automatically each night; see Settings."))), shapeBox, out);
+  root.append(strategyBox(false), h("div", { class: "card" }, h("div", { class: "row" }, connect, refresh, h("span", { class: "mute" }, "Snapshots are stored by this app, not in Actual. Refresh as often as you like; one snapshot per account per day is kept. A snapshot is also taken automatically each night; see Settings."))), shapeBox, out);
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
 
@@ -724,15 +748,20 @@ function settingsBar(root, { fields = [], extra = null, title = "Settings" } = {
 const ASSET_LABEL = { home: "Home", vehicle: "Vehicle", camper: "Camper / RV", other: "Other" };
 function assetsTab() {
   const root = $("assets"), out = h("div"), today = new Date().toISOString().slice(0, 10);
+  settingsBar(root, { fields: [
+    { path: "reminders.enabled", label: "Remind me monthly to update values", type: "bool", tip: "A banner appears at the top of every page, starting on the reminder day, for each asset you have not updated by hand this month. If NOTIFY_URL is set on the server, a push is also sent that day and every 7 days while something is still due." },
+    { path: "reminders.day", label: "Reminder day of the month (1-28)", type: "number" },
+  ] });
   const field = (label, el) => h("label", { class: "setfield" }, h("span", { class: "lbl" }, label), el);
   const mk = (type, val, extra = {}) => h("input", { type, class: "in", step: "any", value: val ?? "", ...extra });
-  let accounts = [], cdOn = false, fredOn = false;
+  let accounts = [], cdOn = false, fredOn = false, due = new Set();
   const acctSelect = (cur) => { const s = h("select", {}, h("option", { value: "" }, "None, I'll enter values by hand"), accounts.map((a) => h("option", { value: a.name }, `${a.name} (${usd(a.balance)})`))); s.value = cur || ""; return s; };
   const guard = (box, fn) => async () => { try { await fn(); } catch (e) { box.replaceChildren(h("div", { class: "err" }, e.message)); } };
 
   function assetForm(a, done) {
     const name = mk("text", a?.name, { placeholder: "e.g. Primary home" }), type = h("select", {}, Object.entries(ASSET_LABEL).map(([k, v]) => h("option", { value: k }, v))); type.value = a?.type || "home";
     const link = acctSelect(a?.actualAccount), watch = mk("text", a?.watchId, { placeholder: "Paste the watch ID or its edit URL" }), rx = mk("text", a?.valueRegex, { placeholder: "Optional, e.g. Zestimate[^$]*\\$([0-9,]+)" }), msg = h("div"), val = mk("number", "", { min: 0, inputmode: "decimal", placeholder: "Current value" });
+    const lookup = mk("url", a?.lookupUrl, { placeholder: "Paste your Zillow, Redfin or KBB page" }), remindCb = h("input", { type: "checkbox" }); remindCb.checked = a ? a.remind !== false : true;
     const E = a?.estimate || {}, em = h("select", {}, h("option", { value: "" }, "No automatic estimate"), h("option", { value: "index" }, "House price index (FRED)"), h("option", { value: "depreciation" }, "Depreciation (vehicles, campers)")); em.value = E.method || "";
     const eBase = mk("number", E.baseValue, { min: 0, placeholder: "Known value ($)" }), eDate = mk("date", E.baseDate || today), eSeries = mk("text", E.series || "USSTHPI", { placeholder: "FRED series, e.g. USSTHPI" }), eRate = mk("number", E.annualRate != null ? Math.round(E.annualRate * 1000) / 10 : 12, { min: 0, max: 60, step: "0.1" });
     const eBox = h("div"), hint = (t) => h("small", { class: "mute", style: "display:block;margin:6px 0" }, t);
@@ -741,11 +770,12 @@ function assetsTab() {
     em.addEventListener("change", drawE); drawE();
     const save = h("button", { class: "act" }, a ? "Save changes" : "Add asset");
     save.addEventListener("click", guard(msg, async () => {
-      const rec = await api("/api/assets", { body: { id: a?.id, name: name.value, type: type.value, actualAccount: link.value || null, watchId: watch.value.trim() || null, valueRegex: rx.value.trim(), estimate: em.value ? { method: em.value, baseValue: +eBase.value, baseDate: eDate.value, series: eSeries.value.trim(), annualRate: (+eRate.value || 0) / 100 } : null } });
+      const rec = await api("/api/assets", { body: { id: a?.id, name: name.value, type: type.value, actualAccount: link.value || null, lookupUrl: lookup.value.trim(), remind: remindCb.checked, watchId: watch.value.trim() || null, valueRegex: rx.value.trim(), estimate: em.value ? { method: em.value, baseValue: +eBase.value, baseDate: eDate.value, series: eSeries.value.trim(), annualRate: (+eRate.value || 0) / 100 } : null } });
       if (!a && val.value !== "") await api("/api/assets/value", { body: { id: rec.id, date: today, value: +val.value, note: "Starting value" } });
       done();
     }));
     return h("div", { class: "card" }, h("div", { class: "row fields" }, field("Name", name), field("Type", type), field("Take the value from an Actual account", link), a ? null : field("Value today ($)", val)),
+      h("div", { class: "row fields" }, field("Link to check the value (optional)", lookup), h("label", { class: "check" }, remindCb, "Remind me monthly")),
       h("div", { class: "row fields" }, field("changedetection.io watch (optional)", watch), field("Value pattern (optional)", rx)),
       h("div", { class: "row fields" }, field("Estimate automatically", em)), eBox,
       h("small", { class: "mute", style: "display:block;margin:6px 0" }, cdOn ? "Each night the app reads the watch's latest snapshot and takes the first dollar amount in it, or the first group of your pattern. A reading more than 25% away from the last value is held back for you to check." : "changedetection.io is not connected. Set CHANGEDETECTION_URL and CHANGEDETECTION_API_KEY on the server (see README) to use a watch."),
@@ -766,18 +796,24 @@ function assetsTab() {
     const lf = a.lastFetch ? h("div", { class: a.lastFetch.ok ? "mute" : "warn" }, `changedetection.io, ${new Date(a.lastFetch.at).toLocaleString()}: ${a.lastFetch.message}`) : null;
     const estB = a.estimate ? h("button", { class: "alt" }, "Estimate now") : null;
     estB?.addEventListener("click", guard(msg, async () => { estB.disabled = true; try { await api("/api/assets/estimate", { body: { id: a.id } }); await load(); } finally { estB.disabled = false; } }));
+    const defaults = { home: [["Zillow", "https://www.zillow.com/"], ["Redfin", "https://www.redfin.com/"]], vehicle: [["Kelley Blue Book", "https://www.kbb.com/whats-my-car-worth/"]] }[a.type] || [];
+    const links = h("div", { class: "row actions" }, a.lookupUrl ? h("a", { class: "btnlink", href: a.lookupUrl, target: "_blank", rel: "noopener noreferrer" }, "Open my page") : null,
+      !a.lookupUrl ? defaults.map(([n, u]) => h("a", { class: "btnlink", href: u, target: "_blank", rel: "noopener noreferrer" }, n)) : null,
+      !a.lookupUrl && defaults.length ? h("small", { class: "mute" }, "Tip: edit this asset and paste the exact page for your property or vehicle to open it in one click.") : null);
+    const dueNow = due.has(a.id);
     const edit = h("button", { class: "alt", onclick: () => card.replaceWith(h("div", {}, assetForm(a, () => load()))) }, "Edit"), del = h("button", { class: "alt", onclick: guard(msg, async () => { if (confirm(`Remove ${a.name} and its history?`)) { await api("/api/assets/delete", { body: { id: a.id } }); await load(); } }) }, "Remove");
     const card = h("div", { class: "card asset" },
       h("div", { class: "row" }, h("b", { class: "hval" }, a.name), h("span", { class: "pill" }, ASSET_LABEL[a.type] || a.type), a.actualAccount ? h("span", { class: "mute" }, `from Actual: ${a.actualAccount}`) : null, h("span", { style: "flex:1" }), estB, fetchB, edit, del),
       cur ? h("div", { class: "row" }, h("b", { style: "font-size:1.5rem" }, usd(cur.value)), h("span", { class: "mute" }, `as of ${cur.date}${a.daysOld ? ` (${a.daysOld} days ago)` : ""}`), delta(a.changeSincePrevious, "since previous"), delta(a.changeSinceFirst, `since ${a.firstDate}`)) : h("div", { class: "mute" }, "No value yet. Enter one below."),
       lf,
+      dueNow ? h("div", { class: "warn" }, "Due this month: look up the current value, then enter it below.") : null, links,
       stale ? h("div", { class: "warn" }, `This value is ${a.daysOld} days old. Update it so the history stays meaningful.`) : null,
       h("div", { class: "row fields" }, field("New value ($)", val), field("As of", date), field("Note", note)), h("div", { class: "row actions" }, saveV), msg, a.values.length ? hist : null);
     return card;
   }
 
   async function load() {
-    const [r, accts] = await Promise.all([api("/api/assets"), api("/api/accounts").catch(() => [])]); accounts = accts; cdOn = r.changedetection; fredOn = r.fred;
+    const [r, accts] = await Promise.all([api("/api/assets"), api("/api/accounts").catch(() => [])]); accounts = accts; cdOn = r.changedetection; fredOn = r.fred; try { due = new Set((await api("/api/reminders")).items.map((x) => x.id)); } catch { due = new Set(); } refreshReminder();
     const total = r.assets.reduce((s, a) => s + (a.current ? a.current.value : 0), 0);
     const addBox = h("div"), addBtn = h("button", { class: "act", onclick: () => fill(addBox, assetForm(null, () => load())) }, "+ Add asset");
     fill(out,
@@ -787,7 +823,7 @@ function assetsTab() {
       r.series.length ? [h("h2", {}, "Value over time"), historyChart(r.series)] : null,
       r.assets.map(assetCard));
   }
-  root.append(h("div", { class: "mute" }, "Track what your home, vehicles and camper are worth. Enter a value whenever you look one up, or link an asset to an Actual account and it updates in the nightly snapshot."), out);
+  root.append(strategyBox(false), h("div", { class: "mute" }, "Track what your home, vehicles and camper are worth. Enter a value whenever you look one up, or link an asset to an Actual account and it updates in the nightly snapshot."), out);
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
 // "Test connection to Actual" button, used in the settings of the tabs that read Actual.
@@ -795,6 +831,40 @@ function actualCheck() {
   const chk = h("button", { class: "alt" }, "Test connection to Actual"), out = h("span", { class: "mute" });
   chk.addEventListener("click", async () => { chk.disabled = true; out.textContent = "Testing..."; out.className = "mute"; try { const r = await api("/api/actual/check"); out.textContent = r.message; out.className = r.ok ? "ok" : "err"; } catch (e) { out.textContent = e.message; out.className = "err"; } finally { chk.disabled = false; } });
   return h("div", { class: "row actions" }, chk, out);
+}
+
+// ---------- how Invest, Assets and Actual fit together ----------
+const STRATEGY = [
+  ["Actual", "Day-to-day money: checking, savings, credit cards, your mortgage and loans, and your budget. The companion only reads it (and, if you press Apply, adds notes or categories to Venmo and Amazon transactions). It never changes balances."],
+  ["Invest tab", "Brokerage balances read from SnapTrade (read-only) and saved here as a snapshot every night, so you get a history without keeping those accounts in Actual. If you do keep investment accounts in Actual as off-budget accounts, money you move into them counts as 'to investments / debt' in the Loan planner."],
+  ["Assets tab", "Things with no bank feed: your home, vehicles and camper. Values are typed in (a monthly reminder asks), estimated from a price index or depreciation, or taken from an Actual account if you track the asset there."],
+  ["Loan planner", "Reads cash, income, spending and your mortgage balance from Actual, and the home value from an Actual account or custom value. It does not yet use the Assets tab's home value automatically."],
+  ["Net worth", "Investments (Invest) + assets (Assets) + cash (Actual) - debts (Actual). A combined net-worth page is not built yet."],
+];
+const strategyBox = (open = false) => h("details", { class: "strategy", open }, h("summary", {}, "How Invest, Assets and Actual fit together"), h("dl", {}, STRATEGY.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])));
+(function tabHoverStrategy() { // hover a tab for about a second and a half to see the strategy; leave to hide it
+  const box = h("div", { id: "stratbox", role: "tooltip", hidden: true }); document.body.append(box);
+  let t = null;
+  const hide = () => { clearTimeout(t); box.hidden = true; };
+  document.addEventListener("mouseover", (e) => {
+    if (!matchMedia("(hover: hover)").matches) return;
+    const b = e.target.closest && e.target.closest("#tabs button");
+    clearTimeout(t); if (!b || !["invest", "assets"].includes(b.dataset.tab)) { box.hidden = true; return; }
+    t = setTimeout(() => { fill(box, h("b", {}, "How Invest, Assets and Actual fit together"), STRATEGY.map(([k, v]) => h("p", {}, h("b", {}, k + ": "), v))); box.hidden = false; const r = b.getBoundingClientRect(); box.style.left = Math.min(Math.max(8, r.left), innerWidth - box.offsetWidth - 8) + "px"; box.style.top = r.bottom + 8 + "px"; }, 1500);
+  });
+  document.addEventListener("mouseout", (e) => { if (!e.relatedTarget || !(e.relatedTarget.closest && e.relatedTarget.closest("#tabs button"))) hide(); });
+  addEventListener("scroll", hide, { passive: true });
+})();
+
+// ---------- monthly reminder banner ----------
+async function refreshReminder() {
+  const el = $("reminder");
+  try {
+    const r = await api("/api/reminders");
+    if (!r.count) { el.hidden = true; return; }
+    el.hidden = false;
+    fill(el, h("span", {}, `Time to update ${r.count === 1 ? "this value" : r.count + " values"}: ${r.items.map((i) => i.name).join(", ")}.`), h("button", { class: "alt", onclick: () => show("assets") }, "Open Assets"));
+  } catch { el.hidden = true; }
 }
 
 // ---------- shell ----------
@@ -806,5 +876,6 @@ async function show(name) {
   if (!loaded[name]) { loaded[name] = true; try { await inits[name](); } catch (e) { $(name).append(h("div", { class: "err" }, e.message)); } }
 }
 $("tabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) show(b.dataset.tab); });
-api("/api/status").then((s) => { $("status").textContent = `Actual ${s.actual ? "configured" : "NOT configured"} · SimpleFIN ${s.simplefin ? "on" : "off"} · SnapTrade ${s.snaptrade ? (s.snaptradeConnected ? "connected" : "not connected") : "off"}`; }).catch(() => {});
+api("/api/status").then((s) => { if (s.version) $("ver").textContent = "v" + s.version; $("status").textContent = `Actual ${s.actual ? "configured" : "NOT configured"} · SimpleFIN ${s.simplefin ? "on" : "off"} · SnapTrade ${s.snaptrade ? (s.snaptradeConnected ? "connected" : "not connected") : "off"}`; }).catch(() => {});
 show("loan");
+refreshReminder();
