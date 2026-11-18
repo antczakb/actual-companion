@@ -169,3 +169,7 @@ The nightly job refreshes an estimate when the last one is a week old; "Estimate
 - **Reserve needed** for the job loss is the cash that must already be set aside when it starts so cash never hits zero (no new loan), also in months of spending, with a button to adopt it as your reserve.
 - A **summary bar at the bottom** (selected loan, borrow amount, payment, verdict) stays visible on the Loan tab; tap it to go to Result.
 - Fixes: the "How Net worth, Invest, Assets and Actual fit together" text showed as "[object ...]"; Assets values now count toward Net worth even before any SimpleFIN balances exist.
+
+## v0.1.22: sortable and filterable tables
+
+Outside the Loan tab, click a column heading to sort ascending, then descending, then back to original order. A dropdown under each heading filters to one value (shown when a column has 2 to 30 distinct values). On phones, a "Sort and filter" control above each table does the same. Money and percent text sorts numerically.

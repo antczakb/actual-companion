@@ -198,3 +198,15 @@ button.colbtn.off { opacity:.4; text-decoration:line-through; }
 body:not([data-tab=loan]) .sumbar { display:none; }
 body.has-sumbar[data-tab=loan] main { padding-bottom:84px; }
 @media (max-width:720px) { .sumbar { bottom:calc(var(--nav-h) + env(safe-area-inset-bottom)); } .sumbar .sumin { padding:8px 12px; font-size:13.5px; gap:4px 14px; } body.has-sumbar[data-tab=loan] main { padding-bottom:110px; } }
+
+/* sortable / filterable tables (not in the Loan tab) */
+th.sortable { cursor:pointer; user-select:none; white-space:nowrap; }
+th.sortable:hover { color:var(--acc); }
+th.sortable .sortmark::after { content:" \2195"; opacity:.3; font-size:.85em; }
+th[aria-sort=ascending] .sortmark::after { content:" \25B2"; opacity:1; color:var(--acc); }
+th[aria-sort=descending] .sortmark::after { content:" \25BC"; opacity:1; color:var(--acc); }
+thead tr.filters th { padding:3px 6px; font-weight:400; background:none; }
+thead tr.filters select { width:100%; min-width:70px; font-size:12.5px; padding:3px 4px; }
+.tblctl { display:none; margin:0 0 8px; }
+#loan th.sortable { cursor:default; } #loan th.sortable .sortmark, #loan tr.filters, #loan .tblctl { display:none !important; }
+@media (max-width:720px) { .tblctl { display:block; } }

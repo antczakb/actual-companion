@@ -50,11 +50,38 @@ async function busy(btn, el, fn) {
   btn.disabled = true; el.replaceChildren(h("div", { class: "mute" }, "Working..."));
   try { await fn(); } catch (e) { el.replaceChildren(h("div", { class: "err" }, e.message)); } finally { btn.disabled = false; }
 }
+// Tables sort by clicking a column heading (ascending, descending, off) and filter with a dropdown per column. Not used inside the Loan tab.
+const cellText = (c, r) => { const v = c.render ? c.render(r) : r[c.key]; return v == null ? "" : v instanceof Node ? v.textContent.trim() : String(v).trim(); };
+const sortKey = (c, r) => { if (c.sort) return c.sort(r); if (c.key && typeof r[c.key] === "number") return r[c.key]; const t = cellText(c, r), n = parseFloat(t.replace(/[$,%\s]/g, "").replace(/^\((.*)\)$/, "-$1")); return /^[-+($]?[\d.,]+%?\)?$/.test(t.replace(/\s/g, "")) && !isNaN(n) ? n : t.toLowerCase(); };
 function table(cols, rows, { rowClass, maxRows = 2000, stack } = {}) {
-  const shown = rows.slice(0, maxRows), st = stack ?? (cols.length <= 9 && rows.length <= 40); // phones: small tables become one card per row
-  const t = h("table", { class: st ? "stack" : "" }, h("thead", {}, h("tr", {}, cols.map((c) => h("th", { class: (c.num ? "n " : "") + (c.tip ? "hastip" : ""), "data-tip": c.tip || null }, c.label)))),
-    h("tbody", {}, shown.map((r) => h("tr", { class: rowClass ? rowClass(r) : "" }, cols.map((c) => h("td", { class: c.num ? "n" : "", "data-label": c.label }, c.render ? c.render(r) : (r[c.key] ?? "")))))));
-  return h("div", {}, h("div", { class: "tablewrap" + (st ? " stackwrap" : "") }, t), rows.length > maxRows ? h("div", { class: "mute" }, `Showing first ${maxRows} of ${rows.length} rows.`) : null);
+  const st = stack ?? (cols.length <= 9 && rows.length <= 40); // phones: small tables become one card per row
+  const live = cols.map((c) => c.label !== "" && !c.nosort), sort = { i: -1, dir: 1 }, filt = new Map();
+  const opts = cols.map((c, i) => { if (!live[i] || rows.length < 3) return null; const v = [...new Set(rows.map((r) => cellText(c, r)))].filter((x) => x !== ""); return v.length >= 2 && v.length <= 30 && v.length < rows.length ? v.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) : null; });
+  const body = h("tbody"), note = h("div", { class: "mute" }), ths = [];
+  const draw = () => {
+    let list = rows.filter((r) => [...filt].every(([i, v]) => cellText(cols[i], r) === v));
+    if (sort.i >= 0) { const c = cols[sort.i]; list = list.map((r) => [sortKey(c, r), r]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0) * sort.dir).map((x) => x[1]); }
+    body.replaceChildren(...list.slice(0, maxRows).map((r) => h("tr", { class: rowClass ? rowClass(r) : "" }, cols.map((c) => h("td", { class: c.num ? "n" : "", "data-label": c.label }, c.render ? c.render(r) : (r[c.key] ?? ""))))));
+    ths.forEach(([i, th]) => th.setAttribute("aria-sort", sort.i === i ? (sort.dir > 0 ? "ascending" : "descending") : "none"));
+    note.textContent = list.length > maxRows ? `Showing first ${maxRows} of ${list.length} rows.` : filt.size ? `${list.length} of ${rows.length} rows shown.` : "";
+  };
+  const setSort = (i) => { if (sort.i === i) { if (sort.dir > 0) sort.dir = -1; else { sort.i = -1; sort.dir = 1; } } else { sort.i = i; sort.dir = 1; } draw(); };
+  const setFilter = (i, v) => { v ? filt.set(i, v) : filt.delete(i); draw(); };
+  const mkSel = (i) => { const sel = h("select", { "aria-label": `Filter ${cols[i].label}` }, h("option", { value: "" }, "All"), opts[i].map((v) => h("option", { value: v }, v))); sel.addEventListener("change", () => setFilter(i, sel.value)); return sel; };
+  const head = h("tr", {}, cols.map((c, i) => { const th = h("th", { class: (c.num ? "n " : "") + (c.tip ? "hastip " : "") + (live[i] ? "sortable" : ""), "data-tip": c.tip || null, ...(live[i] ? { "aria-sort": "none", tabindex: 0 } : {}) }, c.label, live[i] ? h("span", { class: "sortmark", "aria-hidden": "true" }) : null);
+    if (live[i]) { ths.push([i, th]); const go = (e) => { if (e.target.closest("select") || th.closest("#loan")) return; setSort(i); }; th.addEventListener("click", go); th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(e); } }); }
+    return th; }));
+  const anyFilter = opts.some(Boolean);
+  const frow = anyFilter ? h("tr", { class: "filters" }, cols.map((c, i) => h("th", {}, opts[i] ? mkSel(i) : null))) : null;
+  const t = h("table", { class: st ? "stack" : "" }, h("thead", {}, head, frow), body);
+  // Phones hide the header row, so a small control above the table does the same job.
+  const mSort = h("select", { "aria-label": "Sort by" }, h("option", { value: "-1" }, "Original order"), cols.map((c, i) => (live[i] ? h("option", { value: i }, c.label) : null)));
+  const mDir = h("button", { class: "alt", type: "button" }, "Ascending");
+  const syncM = () => { sort.i = +mSort.value; mDir.textContent = sort.dir > 0 ? "Ascending" : "Descending"; draw(); };
+  mSort.addEventListener("change", () => { sort.dir = 1; syncM(); }); mDir.addEventListener("click", () => { sort.dir *= -1; syncM(); });
+  const mobile = rows.length >= 3 && cols.some((_, i) => live[i]) ? h("details", { class: "tblctl" }, h("summary", {}, "Sort and filter"), h("div", { class: "row fields" }, h("label", {}, h("span", { class: "lbl" }, "Sort by"), mSort), mDir, cols.map((c, i) => (opts[i] ? h("label", {}, h("span", { class: "lbl" }, c.label), (() => { const sel = mkSel(i); return sel; })()) : null)))) : null;
+  draw();
+  return h("div", { class: "tbl" }, mobile, h("div", { class: "tablewrap" + (st ? " stackwrap" : "") }, t), note);
 }
 // Hover/tap tooltip for charts: shows the label and every series' value at the nearest point. xs = pixel x of each point in viewBox units.
 function chartHover(wrap, svg, W, xs, rows, hi) {
