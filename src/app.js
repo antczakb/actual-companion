@@ -367,7 +367,7 @@ export function createHandlers(d) {
     const dates = parsed.items.map((r) => r.shipDate || r.date).sort();
     const pad = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
     const [bank, categories, accounts] = await Promise.all([actual.getTransactions(pad(dates[0], -a.dayWindow - 1), pad(dates.at(-1), a.dayWindow + 1)), actual.getCategories(), actual.getAccounts()]);
-    const result = matchAmazon(parsed.items, bank, categories, { windowDays: a.dayWindow, payeeRegex: a.payeeRegex, keywordCategories: a.keywordCategories });
+    const result = matchAmazon(parsed.items, bank, categories, { windowDays: a.dayWindow, payeeRegex: a.payeeRegex, keywordCategories: a.keywordCategories, departmentCategories: a.departmentCategories });
     const catName = new Map(categories.map((c) => [c.id, `${c.groupName}: ${c.name}`])), acctName = new Map(accounts.map((x) => [x.id, x.name]));
     const itemsText = (c) => c.items.map((i) => i.name).join(" | ");
     const view = {
@@ -379,7 +379,11 @@ export function createHandlers(d) {
       })),
       unmatchedOrders: result.unmatchedOrders.map((o) => ({ key: o.key, date: o.date, amount: o.amount, items: itemsText(o), reason: o.reason })),
       unmatchedBank: result.unmatchedBank.map((b) => ({ date: b.date, amount: -b.amount, payee: b.importedPayee || b.payeeName, account: acctName.get(b.accountId) || "" })),
-      categories: categories.filter((c) => !c.isIncome && !c.hidden).map((c) => ({ id: c.id, name: `${c.groupName}: ${c.name}` })),
+      categories: categories.filter((c) => !c.isIncome && !c.hidden).map((c) => ({ id: c.id, name: `${c.groupName}: ${c.name}`, plain: c.name })),
+      hasDepartment: parsed.hasDepartment, columns: parsed.columns, departmentCategories: a.departmentCategories || {},
+      // What Amazon calls each item (department) next to the Actual category it is proposed for, and why. One row per department/category/basis.
+      report: amazonReport(result.matched, catName),
+      departments: amazonDepartments(parsed.items, a.departmentCategories || {}),
     };
     return { result, view };
   }
@@ -414,4 +418,21 @@ export function createHandlers(d) {
     };
     return { result, view };
   }
+}
+
+// Per department / basis / proposed category: how many charges and how much money, so the mapping can be checked at a glance.
+function amazonReport(matched, catName) {
+  const rows = new Map();
+  for (const m of matched) {
+    const cat = m.proposal.categoryId ? catName.get(m.proposal.categoryId) : m.bank.categoryId ? `${catName.get(m.bank.categoryId) || "existing"} (kept)` : "(none)";
+    const basis = (m.proposal.categorySource || "none").replace(/;.*$/, ""), dept = m.departments.length ? m.departments.join(", ") : "";
+    const k = `${dept}|${basis}|${cat}`, r = rows.get(k) || { department: dept, basis, category: cat, charges: 0, amount: 0 };
+    r.charges++; r.amount += -m.bank.amount; rows.set(k, r);
+  }
+  return [...rows.values()].map((r) => ({ ...r, amount: Math.round(r.amount * 100) / 100 }));
+}
+function amazonDepartments(items, map) {
+  const rows = new Map();
+  for (const i of items) { if (!i.department) continue; const r = rows.get(i.department) || { department: i.department, items: 0, amount: 0, category: map[i.department] || "" }; r.items++; r.amount += i.amount || 0; rows.set(i.department, r); }
+  return [...rows.values()].map((r) => ({ ...r, amount: Math.round(r.amount * 100) / 100 })).sort((a, b) => b.amount - a.amount);
 }

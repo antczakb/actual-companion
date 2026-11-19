@@ -192,3 +192,9 @@ Outside the Loan tab, click a column heading to sort ascending, then descending,
 
 - Utilities settings ("How payments are found") now has a mode: **payee name only** (default, as before), **Actual category only**, **either**, or **both**. Pick the Actual categories for each utility and/or the payee pattern. "Both" is the strictest and needs a payee pattern and a category for each utility.
 - Saving these settings now applies immediately and reloads the tab; no recalculation step is needed.
+
+## v0.1.26: category dropdown; Amazon department report
+
+- Utilities settings: the Actual categories for each utility are now a dropdown that shows what is selected, scrolls, and can be filtered by typing.
+- Amazon tab: a table lists each proposed Actual category with the Amazon department it came from, the rule that chose it (item keyword, department mapping or the category Actual already had), charges and spend, so a bad rule is easy to spot. Click a heading to sort.
+- If the order file has a department / category column (matched by name: department, product category, item category, category, product group), a second table lets you map each Amazon department to an Actual category (saved in Settings as `amazon.departmentCategories`). It is used only when no item keyword matched. If the file has no such column, the tab says so and lists the columns it found. The standard "Request My Data" export may not include one.

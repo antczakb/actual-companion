@@ -18,6 +18,7 @@ const ALIASES = {
   owed: ["total owed", "item total", "total charged", "total", "amount", "grand total"],
   status: ["order status", "status"],
   payment: ["payment instrument type", "payment method"],
+  department: ["department", "product category", "item category", "amazon category", "category", "product group", "product type"],
 };
 const norm = (s) => String(s || "").trim().toLowerCase();
 
@@ -45,12 +46,12 @@ export function parseAmazonCSV(text) {
       amount = unit == null ? null : unit * qty + (parseMoney(g("unitTax")) || 0) + (parseMoney(g("shipping")) || 0) - Math.abs(parseMoney(g("discount")) || 0);
     }
     const status = g("status");
-    const item = { orderId, date: isoDate(od), shipDate: g("shipDate") ? isoDate(g("shipDate")) : null, name: g("name").replace(/\s+/g, " "), qty, amount, status, payment: g("payment") };
+    const item = { orderId, date: isoDate(od), shipDate: g("shipDate") ? isoDate(g("shipDate")) : null, name: g("name").replace(/\s+/g, " "), qty, amount, status, payment: g("payment"), department: g("department") };
     if (amount == null || Number.isNaN(amount)) { skipped.push({ ...item, reason: "no amount" }); continue; }
     if (/cancel|return|refund/i.test(status)) { skipped.push({ ...item, reason: `status ${status}` }); continue; }
     items.push(item);
   }
-  return { items, skipped };
+  return { items, skipped, columns: rows[hi].map((c) => c.trim()).filter(Boolean), hasDepartment: map.department >= 0 };
 }
 
 function isoDate(s) {
@@ -85,7 +86,7 @@ const shortName = (s) => clip(s.replace(/\s*[,|(\-–].*$/, "").trim() || s, 48)
 
 // bank: [{id, date, amount, payeeName, importedPayee, notes, categoryId, accountId}]. Amazon charges are negative in the bank.
 export function matchAmazon(items, bank, categories, opts = {}) {
-  const { windowDays = 7, payeeRegex = "amazon|amzn", keywordCategories = {} } = opts;
+  const { windowDays = 7, payeeRegex = "amazon|amzn", keywordCategories = {}, departmentCategories = {} } = opts;
   const re = new RegExp(payeeRegex, "i");
   const applied = new Set();
   for (const b of bank) for (const m of (b.notes || "").matchAll(/\[amzn:([^\]]+)\]/g)) applied.add(m[1]);
@@ -116,13 +117,18 @@ export function matchAmazon(items, bank, categories, opts = {}) {
   for (const m of matched) {
     const c = m.charge, b = m.bank, hits = new Map();
     for (const it of c.items) for (const [word, cname] of kw) if (it.name.toLowerCase().includes(word.toLowerCase())) { const id = catByName.get(cname.toLowerCase()); const h = hits.get(id) || { amount: 0, word }; h.amount += it.amount; hits.set(id, h); break; }
-    const ranked = [...hits].sort((x, y) => y[1].amount - x[1].amount);
+    // Amazon's own department for the item (when the file has one), mapped to an Actual category by the user. Item keywords win; then department.
+    const dep = new Map();
+    for (const it of c.items) { const cname = it.department && departmentCategories[it.department] && catByName.get(String(departmentCategories[it.department]).toLowerCase()); if (cname) { const d = dep.get(cname) || { amount: 0, department: it.department }; d.amount += it.amount; dep.set(cname, d); } }
+    const ranked = [...hits].sort((x, y) => y[1].amount - x[1].amount), rankedDep = [...dep].sort((x, y) => y[1].amount - x[1].amount);
     let categoryId = null, source = null;
-    if (ranked.length) { categoryId = ranked[0][0]; source = `item keyword "${ranked[0][1].word}"` + (ranked.length > 1 ? `; also matched ${ranked.length - 1} other category(ies), pick manually if this order is mixed` : ""); }
+    if (!ranked.length && rankedDep.length) { categoryId = rankedDep[0][0]; source = `Amazon department "${rankedDep[0][1].department}"` + (rankedDep.length > 1 ? `; also matched ${rankedDep.length - 1} other department(s), pick manually if this order is mixed` : ""); }
+    else if (ranked.length) { categoryId = ranked[0][0]; source = `item keyword "${ranked[0][1].word}"` + (ranked.length > 1 ? `; also matched ${ranked.length - 1} other category(ies), pick manually if this order is mixed` : ""); }
     else if (b.categoryId) { categoryId = b.categoryId; source = "existing"; }
     const names = c.items.map((i) => shortName(i.name) + (i.qty > 1 ? ` x${i.qty}` : ""));
     const list = names.length > 3 ? `${names.slice(0, 3).join("; ")} (+${names.length - 3} more)` : names.join("; ");
-    m.proposal = { notes: clip(`Amazon: ${list}`, 170) + ` [amzn:${c.key}]`, categoryId, categorySource: source, mixed: ranked.length > 1 };
+    m.departments = [...new Set(c.items.map((i) => i.department).filter(Boolean))];
+    m.proposal = { notes: clip(`Amazon: ${list}`, 170) + ` [amzn:${c.key}]`, categoryId, categorySource: source, mixed: ranked.length > 1 || (!ranked.length && rankedDep.length > 1) };
   }
   const unmatchedOrders = todoS.filter((s) => !usedS.has(s.key)).map((s) => ({ ...s, reason: "No Amazon-looking bank charge with the same amount within the date window (gift card, points, split payment, or not yet posted?)" }));
   const unmatchedBank = candidates.filter((_, j) => !usedB.has(j));

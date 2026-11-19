@@ -53,3 +53,16 @@ test("match: outside the date window does not match, and refunds (positive bank 
   const r = matchAmazon(items, [bank("b1", "2026-12-20", -21.4), bank("b2", "2026-11-03", 21.4)], cats, {});
   assert.equal(r.matched.length, 0); assert.ok(r.unmatchedOrders.length >= 3);
 });
+
+test("department column: parsed, mapped to an Actual category after keywords, reported per department", () => {
+  const csv = "Order ID,Order Date,Product Name,Total Owed,Ship Date,Department\n1,2026-11-01,Dog Food,21.40,2026-11-02,Pet Supplies\n2,2026-11-03,Garden Hose,32.10,2026-11-04,Patio & Garden\n3,2026-11-05,Widget,10.00,2026-11-06,Gadgets\n";
+  const { items, hasDepartment, columns } = parseAmazonCSV(csv);
+  assert.equal(hasDepartment, true); assert.equal(items[0].department, "Pet Supplies"); assert.ok(columns.includes("Department"));
+  assert.equal(parseAmazonCSV(CSV).hasDepartment, false);
+  const b = [bank("b1", "2026-11-02", -21.4), bank("b2", "2026-11-04", -32.1), bank("b3", "2026-11-06", -10)];
+  const r = matchAmazon(items, b, cats, { departmentCategories: { "Pet Supplies": "Pets", "Patio & Garden": "Home" }, keywordCategories: { hose: "Camper" } });
+  const by = (id) => r.matched.find((m) => m.bank.id === id);
+  assert.equal(by("b1").proposal.categoryId, "pet"); assert.match(by("b1").proposal.categorySource, /Amazon department "Pet Supplies"/);
+  assert.equal(by("b2").proposal.categoryId, "rv", "item keyword beats department");
+  assert.equal(by("b3").proposal.categoryId, null, "unmapped department proposes nothing"); assert.deepEqual(by("b3").departments, ["Gadgets"]);
+});

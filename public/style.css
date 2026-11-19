@@ -212,3 +212,14 @@ thead tr.filters select { width:100%; min-width:70px; font-size:12.5px; padding:
 @media (max-width:720px) { .tblctl { display:block; } }
 .chartgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr)); gap:4px 18px; }
 .card.util > h2 { margin-top:0; }
+
+/* multi-select dropdown (details) */
+details.dd { width:100%; }
+details.dd > summary.ddsum { cursor:pointer; list-style:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); }
+details.dd > summary.ddsum::after { content:" \25BE"; float:right; }
+details.dd[open] > summary.ddsum { border-color:var(--acc); }
+details.dd .ddlist { margin-top:4px; padding:8px; border:1px solid var(--line); border-radius:8px; background:var(--card); }
+details.dd .ddlist .in { width:100%; margin-bottom:6px; }
+details.dd .ddlist .checks { max-height:220px; overflow:auto; display:grid; gap:2px; }
+details.dd .ddlist label[hidden] { display:none; }
+.settings .row.fields { align-items:flex-start; }

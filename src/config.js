@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS = {
   },
   budget: { trailingMonths: 12, tolerancePct: 0.1, toleranceDollars: 10, excludeGroups: [], excludeCategories: [] },
   venmo: { dayWindow: 5, payeeRegex: "venmo", keywordCategories: {} },
-  amazon: { dayWindow: 7, payeeRegex: "amazon|amzn", keywordCategories: {} },
+  amazon: { dayWindow: 7, payeeRegex: "amazon|amzn", keywordCategories: {}, departmentCategories: {} },
   simplefin: { startDaysBack: 90, cacheHours: 6 },
   utilities: { payees: { electric: "duke energy", water: "raleigh", gas: "enbridge|piedmont" }, categories: { electric: [], water: [], gas: [] }, match: "payee" }, // how payments are found in Actual: payee pattern and/or category; match = payee | category | either | both
   networth: { kinds: {} }, // SimpleFIN account id -> cash | investment | credit | loan | other-asset | ignore
@@ -51,6 +51,7 @@ export function validateSettings(s) {
   num(L.maxLtv, "loan.maxLtv", 0, 1); num(L.payoffBudgetPct, "loan.payoffBudgetPct", 0, 1); num(L.horizonMonths, "loan.horizonMonths", 6, 120); num(L.cushion, "loan.cushion", 0); num(L.roundTo, "loan.roundTo", 0);
   for (const k of ["homeValue", "mortgage", "otherLiens"]) num(L[k], `loan.${k}`, 0);
   for (const k of ["homeValueAccount", "mortgageAccount", "otherLiensAccount"]) if (L[k] != null && typeof L[k] !== "string") errs.push(`loan.${k} must be an account name or null`);
+  for (const [k, v] of Object.entries(s.amazon?.departmentCategories || {})) if (typeof v !== "string" || !k.trim()) errs.push("amazon.departmentCategories needs a department and a category name on every row");
   if (s.amazon) {
     num(s.amazon.dayWindow, "amazon.dayWindow", 0, 60);
     try { new RegExp(s.amazon.payeeRegex || ""); } catch { errs.push("amazon.payeeRegex is not a valid pattern"); }
