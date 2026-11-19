@@ -12,6 +12,7 @@ import { ChangeDetectionAdapter } from "./adapters/changedetection.js";
 import { NotifyAdapter } from "./adapters/notify.js";
 import { FredAdapter } from "./adapters/fred.js";
 import { BalanceStore } from "./lib/networth.js";
+import { WeatherStore } from "./lib/weather.js";
 import { UtilityStore } from "./lib/utilities.js";
 import { AssetStore } from "./lib/assets.js";
 import { SnapshotState, createSnapshotJob } from "./lib/schedule.js";
@@ -73,6 +74,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     settings: settingsStore,
     scenarios: new ScenarioStore(path.join(dataDir, "scenarios.json")),
     balances: new BalanceStore(path.join(dataDir, "balances.json")),
+    weather: new WeatherStore(path.join(dataDir, "weather.json")),
     utilities: new UtilityStore(path.join(dataDir, "utilities.json")),
     assets: new AssetStore(path.join(dataDir, "assets.json")),
     snapshotState,

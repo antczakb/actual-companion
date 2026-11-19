@@ -21,7 +21,7 @@ const httpErr = (status, message) => Object.assign(new Error(message), { status 
 const num = (v) => (v === undefined || v === "" || v === null ? null : Number.isFinite(+v) ? +v : null);
 
 export function createHandlers(d) {
-  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, balances, utilities, snapshotState, changedetection, fred, notify, version, now = () => new Date() } = d;
+  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, balances, utilities, weather, weatherFetch, snapshotState, changedetection, fred, notify, version, now = () => new Date() } = d;
   const month0 = () => currentMonth(now());
   const today = () => localDate(now());
 
@@ -119,13 +119,15 @@ export function createHandlers(d) {
       settings.set(s); return { ok: true };
     },
 
-    "GET /api/utilities": async () => ({ payees: settings.get().utilities.payees, utilities: utilities.view() }),
+    "GET /api/utilities": async () => { const W = settings.get().weather; return { payees: settings.get().utilities.payees, weather: { ...W, lastDay: weather.last() }, utilities: utilities.view(W.enabled ? weather.all() : [], { baseTemp: W.baseTemp }) }; },
+    "POST /api/utilities/weather/refresh": async () => { const r = await refreshWeather(); if (r.skipped) throw httpErr(400, "Weather is turned off in settings."); return r; },
     // Raw file upload (Duke Green Button .xml, .csv, Raleigh water .pdf). The body is the file; ?name= and optional ?utility=.
     "POST /api/utilities/upload": async ({ query, body }) => {
       if (!Buffer.isBuffer(body) || !body.length) throw httpErr(400, "No file received.");
       const r = await importFile(query.name || "", body, { utilityHint: UTILITIES[query.utility] ? query.utility : undefined });
       const saved = r.daily ? utilities.setDaily(r.utility, r.daily) : utilities.addBills(r.bills);
-      return { utility: r.utility, what: r.what, ...saved };
+      let weatherNote = null; try { await refreshWeather(); } catch (e) { weatherNote = e.message; }
+      return { utility: r.utility, what: r.what, ...saved, weatherNote };
     },
     "POST /api/utilities/clear": async ({ body }) => { if (!UTILITIES[body?.utility]) throw httpErr(400, "Unknown utility."); utilities.remove(body.utility); return { ok: true }; },
     // What you paid each utility per month, from Actual transactions that match the payee pattern.
@@ -322,6 +324,13 @@ export function createHandlers(d) {
     return { date, accounts: accts.length, errors: data.errors || [] };
   }
 
+  // Daily weather from the first bill to about a week ago (the archive lags). Fetches only what is missing.
+  async function refreshWeather() {
+    const W = settings.get().weather; if (!W.enabled) return { skipped: true };
+    const v = utilities.view(), firsts = Object.values(v).flatMap((u) => u.bills.map((b) => b.periodStart || new Date(Date.parse(b.periodEnd + "T00:00:00Z") - 30 * 864e5).toISOString().slice(0, 10)));
+    return weather.refresh({ lat: W.lat, lon: W.lon, from: firsts.sort()[0], today: today(), fetchImpl: weatherFetch || fetch });
+  }
+
   // End-of-day snapshot: investment balances from SnapTrade, plus today's balance for assets linked to an Actual account.
   async function runSnapshot() {
     const date = today(), out = { date, investments: 0, assets: 0, notes: [] };
@@ -340,6 +349,7 @@ export function createHandlers(d) {
       try { const r = await recordSimpleFINBalances(); out.netWorthAccounts = r.accounts; if (r.errors?.length) out.notes.push(`SimpleFIN: ${r.errors.join("; ")}`); }
       catch (e) { out.notes.push(`SimpleFIN balances: ${e.message}`); }
     }
+    if (weather) { try { const r = await refreshWeather(); if (r.days) out.notes.push(`Weather: ${r.days} new day(s)`); } catch (e) { out.notes.push(`Weather: ${e.message}`); } }
     for (const a of assets.list().filter((x) => x.watchId)) { const r = await fetchWatchedValue(a); out.notes.push(`${a.name}: ${r.message}`); if (r.ok && r.recorded) out.assets++; }
     for (const a of assets.list().filter((x) => x.estimate && !x.actualAccount && !x.watchId)) { const r = await recordEstimate(a, { onlyIfStale: true }); if (r.recorded || !r.ok) out.notes.push(`${a.name}: ${r.message}`); if (r.recorded) out.assets++; }
     const linked = assets.list().filter((a) => a.actualAccount);

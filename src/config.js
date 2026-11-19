@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS = {
   amazon: { dayWindow: 7, payeeRegex: "amazon|amzn", keywordCategories: {}, departmentCategories: {} },
   simplefin: { startDaysBack: 90, cacheHours: 6 },
   utilities: { payees: { electric: "duke energy", water: "raleigh", gas: "enbridge|piedmont" }, categories: { electric: [], water: [], gas: [] }, match: "payee" }, // how payments are found in Actual: payee pattern and/or category; match = payee | category | either | both
+  weather: { enabled: true, lat: 35.78, lon: -78.64, baseTemp: 65 }, // home location (default: Raleigh) for comparing utility use with weather; Open-Meteo archive, no key
   networth: { kinds: {} }, // SimpleFIN account id -> cash | investment | credit | loan | other-asset | ignore
   reminders: { enabled: true, day: 1 }, // monthly "update your home and vehicle values" reminder (banner, plus a push if NOTIFY_URL is set)
   snapshots: { enabled: true, time: "23:55" }, // end-of-day investment and asset snapshot, server local time
@@ -61,6 +62,7 @@ export function validateSettings(s) {
   for (const k of ["electric", "water", "gas"]) { try { new RegExp(s.utilities?.payees?.[k] || ""); } catch { errs.push(`utilities.payees.${k} is not a valid pattern`); } }
   if (!["payee", "category", "either", "both"].includes(s.utilities?.match)) errs.push("utilities.match must be payee, category, either or both");
   for (const k of ["electric", "water", "gas"]) if (!Array.isArray(s.utilities?.categories?.[k])) errs.push(`utilities.categories.${k} must be a list`);
+  if (s.weather) { num(s.weather.lat, "weather.lat", -90, 90); num(s.weather.lon, "weather.lon", -180, 180); num(s.weather.baseTemp, "weather.baseTemp", 40, 80); }
   if (s.reminders) { if (typeof s.reminders.enabled !== "boolean") errs.push("reminders.enabled must be true or false"); num(s.reminders.day, "reminders.day", 1, 28); }
   if (s.snapshots) { if (typeof s.snapshots.enabled !== "boolean") errs.push("snapshots.enabled must be true or false"); if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.snapshots.time || "")) errs.push("snapshots.time must look like 23:55"); }
   (s.projection?.existingLoans || []).forEach((x, i) => {

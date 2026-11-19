@@ -56,7 +56,7 @@ const sortKey = (c, r) => { if (c.sort) return c.sort(r); if (c.key && typeof r[
 function table(cols, rows, { rowClass, maxRows = 2000, stack } = {}) {
   const st = stack ?? (cols.length <= 9 && rows.length <= 40); // phones: small tables become one card per row
   const live = cols.map((c) => c.label !== "" && !c.nosort), sort = { i: -1, dir: 1 }, filt = new Map();
-  const opts = cols.map((c, i) => { if (!live[i] || rows.length < 3) return null; const v = [...new Set(rows.map((r) => cellText(c, r)))].filter((x) => x !== ""); return v.length >= 2 && v.length <= 30 && v.length < rows.length ? v.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) : null; });
+  const opts = cols.map((c, i) => { if (!live[i] || c.num || rows.length < 6) return null; const v = [...new Set(rows.map((r) => cellText(c, r)))].filter((x) => x !== ""); return v.length >= 2 && v.length <= 30 && v.length < rows.length ? v.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) : null; });
   const body = h("tbody"), note = h("div", { class: "mute" }), ths = [];
   const draw = () => {
     let list = rows.filter((r) => [...filt].every(([i, v]) => cellText(cols[i], r) === v));
@@ -670,6 +670,37 @@ function networthTab() {
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
 
+// ---- Utilities: years on top of one another, and year-over-year with weather and rate ----
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], YEAR_COLORS = ["#8a8f98", "#2a9d8f", "#c55a11", "#8a3ffc", "#d6a100", "#1f5fbf"];
+const UTIL_METRICS = [["usagePerDay", "Usage per day", (b) => (b.usage != null && b.days ? b.usage / b.days : null), false], ["usage", "Usage per bill", (b) => b.usage, false], ["amount", "Cost per bill", (b) => b.amount, true], ["rate", "Cost per unit (rate)", (b) => b.perUnit, false], ["temp", "Average temperature (F)", (b) => b.wx?.avgTemp ?? null, false], ["dd", "Heating + cooling degree days per day", (b) => (b.wx?.hdd == null ? null : (b.wx.hdd + b.wx.cdd) / b.days), false], ["rain", "Rain per day (inches)", (b) => (b.wx?.precip == null ? null : b.wx.precip / b.days), false]];
+function compareYears(u) {
+  const sel = h("select", { "aria-label": "What to compare" }, UTIL_METRICS.map(([k, l]) => h("option", { value: k }, l))), box = h("div");
+  const draw = () => {
+    const [, label, f, money] = UTIL_METRICS.find((m) => m[0] === sel.value), years = [...new Set(u.bills.map((b) => +b.periodEnd.slice(0, 4)))].sort(), last = years.at(-1);
+    const series = years.map((y, i) => { const v = Array(12).fill(null); for (const b of u.bills) if (+b.periodEnd.slice(0, 4) === y) v[+b.periodEnd.slice(5, 7) - 1] = f(b); return { name: String(y), color: y === last ? "#1f5fbf" : YEAR_COLORS[i % YEAR_COLORS.length], values: v, dash: y !== last && i < years.length - 2 }; });
+    fill(box, series.some((x) => x.values.some((v) => v != null)) ? lineChart(series, MONTH_ABBR, { money }) : h("div", { class: "mute" }, "No weather data for this yet. Check the weather settings, then press Refresh weather."), h("div", { class: "mute" }, `${label}, by the month each bill ends. The newest year is the solid blue line.`));
+  };
+  sel.addEventListener("change", draw); draw();
+  return h("div", {}, h("h3", {}, "All years on top of one another"), h("div", { class: "row" }, h("label", {}, h("span", { class: "lbl" }, "Show"), sel)), box);
+}
+function yearTableCard(u) {
+  const pctS = (v) => (v == null ? "" : (v > 0 ? "+" : "") + Math.round(v * 100) + "%"), n0 = (v) => (v == null ? "" : Math.round(v).toLocaleString("en-US")), money = (v) => (v == null ? "" : (v < 0 ? "-" : "+") + usd(Math.abs(v)));
+  const rows = u.years;
+  if (!rows.length) return null;
+  const cur = rows.find((r) => r.vsPrev), v = cur?.vsPrev;
+  const weatherWords = (w) => [w.tempDiff == null ? null : `${Math.abs(w.tempDiff).toFixed(1)}°F ${w.tempDiff > 0 ? "warmer" : "cooler"} on average`, w.cddPct == null ? null : `cooling need ${pctS(w.cddPct)}`, w.hddPct == null ? null : `heating need ${pctS(w.hddPct)}`, w.precipPct == null ? null : `${w.precipPct < 0 ? "drier" : "wetter"} (${pctS(w.precipPct)} rain)`].filter(Boolean).join(", ");
+  const sentence = v ? [`${cur.year} compared with ${cur.year - 1}, same ${v.monthsCompared} month(s): `, v.usagePct != null ? `usage ${pctS(v.usagePct)}` : null, v.ratePct != null ? `, rate ${pctS(v.ratePct)}` : null, v.costPct != null ? `, cost ${pctS(v.costPct)}` : null, "."].filter(Boolean).join("") : "";
+  const split = v && v.usageEffect != null ? `Of the ${money(v.usageEffect + v.rateEffect)} change in cost, ${money(v.usageEffect)} came from using ${v.usageEffect >= 0 ? "more" : "less"} and ${money(v.rateEffect)} from the rate ${v.rateEffect >= 0 ? "going up" : "going down"}.` : "";
+  const wx = v && v.tempDiff != null ? `Weather: ${weatherWords(v)}.` : v ? "Weather is not available for these months yet (see Settings, then Refresh weather)." : "";
+  return h("div", {}, h("h3", {}, "Year over year: use, rate and weather"),
+    v ? h("div", { class: "note" }, h("div", {}, sentence), split ? h("div", {}, split) : null, h("div", {}, wx)) : h("div", { class: "mute" }, "Needs bills from at least two years."),
+    table([{ label: "Year", key: "year" }, { label: "Bills", num: 1, key: "months" }, { label: `Usage (${u.unit})`, num: 1, sort: (r) => r.usage, render: (r) => n0(r.usage) }, { label: "Cost", num: 1, sort: (r) => r.amount ?? -1, render: (r) => (r.amount == null ? "" : usd(r.amount)) }, { label: `$ per ${u.unit}`, num: 1, sort: (r) => r.rate ?? -1, render: (r) => (r.rate == null ? "" : usd(r.rate, 3)) },
+      { label: "Usage vs prior", num: 1, tip: "Compared with the year before, using only the months both years have a bill for.", sort: (r) => r.vsPrev?.usagePct ?? -9, render: (r) => pctS(r.vsPrev?.usagePct) }, { label: "Rate vs prior", num: 1, sort: (r) => r.vsPrev?.ratePct ?? -9, render: (r) => pctS(r.vsPrev?.ratePct) },
+      { label: "Cost change from usage", num: 1, tip: "What the change in usage cost, at last year's rate.", sort: (r) => r.vsPrev?.usageEffect ?? -1e9, render: (r) => money(r.vsPrev?.usageEffect) }, { label: "Cost change from rate", num: 1, tip: "What the change in rate cost, on this year's usage. Together with the usage column this adds up to the cost change.", sort: (r) => r.vsPrev?.rateEffect ?? -1e9, render: (r) => money(r.vsPrev?.rateEffect) },
+      { label: "Avg temp", num: 1, sort: (r) => r.wx?.avgTemp ?? -999, render: (r) => (r.wx ? r.wx.avgTemp.toFixed(1) + "°" : "") }, { label: "Heating DD", num: 1, sort: (r) => r.wx?.hdd ?? -1, render: (r) => n0(r.wx?.hdd) }, { label: "Cooling DD", num: 1, sort: (r) => r.wx?.cdd ?? -1, render: (r) => n0(r.wx?.cdd) }, { label: "Rain (in)", num: 1, sort: (r) => r.wx?.precip ?? -1, render: (r) => (r.wx ? r.wx.precip.toFixed(1) : "") }], rows, { stack: false }),
+    h("div", { class: "mute" }, "A year with fewer than 12 bills is partial; the comparison columns use only months both years have."));
+}
+
 // ---------- Utilities ----------
 function utilitiesTab() {
   const root = $("utilities"), out = h("div"), msgs = h("div"), file = h("input", { type: "file", multiple: true, accept: ".xml,.csv,.pdf,.txt" }), which = h("select", { "aria-label": "Utility for CSV files" }, [["", "Detect automatically"], ["electric", "Electric"], ["water", "Water"], ["gas", "Natural gas"]].map(([v, l]) => h("option", { value: v }, l)));
@@ -688,7 +719,8 @@ function utilitiesTab() {
   });
   async function load() {
     const r = await api("/api/utilities"), U = r.utilities, anyData = Object.values(U).some((u) => u.bills.length || u.daily.length);
-    fill(out, !anyData ? h("div", { class: "note" }, "Nothing imported yet. Download your usage or bill from each provider (Duke Energy: the Green Button XML and the usage CSV; City of Raleigh: the PDF bill; Enbridge: its usage CSV) and import it above. Importing the same period again replaces it, so re-uploading is safe.") : null, h("div", { class: "subnav", role: "tablist" }, Object.values(U).map((u) => h("button", { role: "tab", class: u.key === active ? "on" : "", onclick: () => { active = u.key; load(); } }, u.label))), section(U[active]));
+    const W = r.weather, wxRow = h("div", { class: "row" }, h("span", { class: "mute" }, W.enabled ? (W.lastDay ? `Weather on file through ${W.lastDay} for ${W.lat}, ${W.lon}.` : "No weather downloaded yet.") : "Weather comparison is off (Settings)."), W.enabled ? h("button", { class: "alt", onclick: async (e) => { e.target.disabled = true; try { const x = await api("/api/utilities/weather/refresh", { body: {} }); await load(); out.prepend(h("div", { class: "ok" }, `Weather updated: ${x.days} new day(s).`)); } catch (er) { out.prepend(h("div", { class: "err" }, er.message)); e.target.disabled = false; } } }, "Refresh weather") : null);
+    fill(out, wxRow, !anyData ? h("div", { class: "note" }, "Nothing imported yet. Download your usage or bill from each provider (Duke Energy: the Green Button XML and the usage CSV; City of Raleigh: the PDF bill; Enbridge: its usage CSV) and import it above. Importing the same period again replaces it, so re-uploading is safe.") : null, h("div", { class: "subnav", role: "tablist" }, Object.values(U).map((u) => h("button", { role: "tab", class: u.key === active ? "on" : "", onclick: () => { active = u.key; load(); } }, u.label))), section(U[active]));
     if (!paid) api("/api/utilities/payments").then((p) => { paid = p; load(); }).catch(() => { paid = { configured: false, payments: {} }; });
     function section(u) {
       const detail = h("div"), txs = paid?.transactions?.[u.key] || [], byId = new Map(txs.map((t) => [t.id, t]));
@@ -704,7 +736,8 @@ function utilitiesTab() {
       };
       const showMonth = (month) => { const m = txs.filter((t) => t.date.slice(0, 7) === month); shown(h("b", {}, `${u.label} payments in ${month}: ${usd(m.reduce((s, t) => s + t.amount, 0), 2)}`), txTable(m) || h("div", { class: "mute" }, "None."), hint); };
       const tbl = u.bills.length ? table([{ label: "Period end", render: (b) => h("button", { class: "linkish", title: "Show the payment for this bill", onclick: () => showBill(b) }, b.periodEnd), sort: (b) => b.periodEnd }, { label: "Period", render: (b) => (b.periodStart ? `${b.periodStart} to ${b.periodEnd}` : b.periodEnd), sort: (b) => b.periodStart || b.periodEnd }, { label: `Usage (${u.unit})`, num: 1, sort: (b) => b.usage ?? -1, render: (b) => n1(b.usage) }, { label: "Cost", num: 1, sort: (b) => b.amount ?? -1, render: (b) => (b.amount == null ? "" : usd(b.amount, 2)) }, { label: `$ per ${u.unit}`, num: 1, sort: (b) => b.perUnit ?? -1, render: (b) => (b.perUnit == null ? "" : usd(b.perUnit, 3)) }, { label: "Avg per day", num: 1, sort: (b) => b.avgPerDay ?? -1, render: (b) => n1(b.avgPerDay) },
-        { label: "Usage vs last year", num: 1, sort: (b) => b.usagePctYoy ?? -9, render: (b) => (b.usagePctYoy == null ? "" : h("span", { class: b.usagePctYoy >= 0.3 ? "down" : "" }, pct(b.usagePctYoy))) }, { label: "Cost vs last year", num: 1, sort: (b) => b.amountPctYoy ?? -9, render: (b) => (b.amountPctYoy == null ? "" : h("span", { class: b.amountPctYoy >= 0.3 ? "down" : "" }, pct(b.amountPctYoy))) }], [...u.bills].reverse(), { maxRows: 240, stack: false }) : null;
+        { label: "Usage vs last year", num: 1, sort: (b) => b.usagePctYoy ?? -9, render: (b) => (b.usagePctYoy == null ? "" : h("span", { class: b.usagePctYoy >= 0.3 ? "down" : "" }, pct(b.usagePctYoy))) }, { label: "Cost vs last year", num: 1, sort: (b) => b.amountPctYoy ?? -9, render: (b) => (b.amountPctYoy == null ? "" : h("span", { class: b.amountPctYoy >= 0.3 ? "down" : "" }, pct(b.amountPctYoy))) }, { label: "Rate vs last year", num: 1, tip: "Change in the price per unit compared with the same period a year earlier.", sort: (b) => b.ratePctYoy ?? -9, render: (b) => (b.ratePctYoy == null ? "" : pct(b.ratePctYoy)) },
+          { label: "Avg temp", num: 1, tip: "Average outdoor temperature over the billing period, F.", sort: (b) => b.wx?.avgTemp ?? -999, render: (b) => (b.wx ? Math.round(b.wx.avgTemp) + "°" : "") }, { label: "Heating DD", num: 1, tip: "Heating degree days: how far each day was below the base temperature, added up. More means a colder period.", sort: (b) => b.wx?.hdd ?? -1, render: (b) => (b.wx?.hdd == null ? "" : Math.round(b.wx.hdd)) }, { label: "Cooling DD", num: 1, tip: "Cooling degree days: how far each day was above the base temperature, added up. More means a hotter period.", sort: (b) => b.wx?.cdd ?? -1, render: (b) => (b.wx?.cdd == null ? "" : Math.round(b.wx.cdd)) }, { label: "Rain (in)", num: 1, sort: (b) => b.wx?.precip ?? -1, render: (b) => (b.wx?.precip == null ? "" : b.wx.precip.toFixed(1)) }], [...u.bills].reverse(), { maxRows: 240, stack: false }) : null;
       const labels = u.bills.map((b) => b.periodEnd.slice(0, 7)), flagged = u.bills.filter((b) => b.flag).slice(-3).reverse();
       const costVals = u.bills.map((b) => (b.amount == null ? null : b.amount));
       const pays = paid?.payments?.[u.key] || [], last12 = pays.slice(-12), paidTotal = last12.reduce((s, x) => s + x.amount, 0);
@@ -719,13 +752,16 @@ function utilitiesTab() {
           pays.length > 1 ? h("div", {}, h("h3", {}, "Paid per month (from Actual)"), lineChart([{ name: "Paid", color: "#1a7f37", values: pays.map((x) => x.amount) }], pays.map((x) => x.month), { onPick: (i) => showMonth(pays[i].month) })) : null),
         h("div", { class: "mute" }, "Click a point on a chart, or a period end in the table, to see the payment behind it."), detail,
         paid && !paid.configured ? h("div", { class: "mute" }, "Connect Actual to see what you paid each month.") : null,
+        u.bills.length ? compareYears(u) : null,
+        u.bills.length ? yearTableCard(u) : null,
         tbl || h("div", { class: "mute" }, "No bills imported yet."),
         u.bills.length || u.daily.length ? h("div", { class: "row actions" }, h("button", { class: "alt", onclick: async () => { if (confirm(`Remove all imported ${u.label.toLowerCase()} data? Your files are not touched.`)) { await api("/api/utilities/clear", { body: { utility: u.key } }); await load(); } } }, `Remove ${u.label.toLowerCase()} data`)) : null);
     }
   }
   const catField = (k, l) => ({ path: `utilities.categories.${k}`, label: `${l}: Actual categories`, type: "categories", tip: "Payments in these Actual categories count as this utility. Used when 'How to find payments' includes categories." });
   const payField = (k, l) => ({ path: `utilities.payees.${k}`, label: `${l}: payee pattern`, type: "text", tip: "Matches the payee name in Actual, any case. Several names: duke|progress. Used when 'How to find payments' includes payees." });
-  settingsBar(root, { title: "How payments are found", onSave: async () => { paid = null; await load(); }, fields: [
+  const wxFields = [{ path: "weather.enabled", label: "Compare with weather", type: "bool", tip: "Downloads daily temperature and rain for your location (Open-Meteo, no account) so bills can be compared with heating and cooling degree days." }, { path: "weather.lat", label: "Latitude", type: "number", hint: "Default is Raleigh. Use your own for a closer match." }, { path: "weather.lon", label: "Longitude", type: "number" }, { path: "weather.baseTemp", label: "Base temperature (F)", type: "number", hint: "Degree days count how far each day is above or below this. 65 is the usual value." }];
+  settingsBar(root, { title: "Settings", onSave: async () => { paid = null; try { await api("/api/utilities/weather/refresh", { body: {} }); } catch { /* shown on the weather line */ } await load(); }, fields: [...wxFields,
     { path: "utilities.match", label: "How to find payments", type: "select", options: [["payee", "By payee name only"], ["category", "By Actual category only"], ["either", "Either payee or category"], ["both", "Both payee and category"]], hint: "\"Either\" finds more; \"Both\" is strictest and needs a payee pattern and a category for each utility." },
     payField("electric", "Electric"), catField("electric", "Electric"), payField("water", "Water"), catField("water", "Water"), payField("gas", "Gas"), catField("gas", "Gas")] });
   root.append(h("div", { class: "card" }, h("h2", {}, "Import bills and usage"), h("div", { class: "row fields" }, h("label", {}, h("span", { class: "lbl" }, "Files (.xml, .csv, .pdf)"), file), h("label", {}, h("span", { class: "lbl" }, "Utility, for CSV files"), which), go), h("div", { class: "mute" }, "Duke Green Button XML (15-minute readings, becomes daily totals), Duke and gas usage CSVs, and Raleigh water PDF bills. Files are read on the server and only the figures are kept; names, addresses and account numbers are not stored."), msgs), out);

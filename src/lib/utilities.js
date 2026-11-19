@@ -6,6 +6,7 @@ import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { parseCSV } from "./csv.js";
+import { summarizeWeather } from "./weather.js";
 
 export const UTILITIES = {
   electric: { label: "Electric", unit: "kWh", provider: "Duke Energy" },
@@ -133,7 +134,7 @@ export class UtilityStore {
     this._write(d); return { added, updated: rows.length - added };
   }
   remove(utility) { const d = this._read(); d.bills = d.bills.filter((x) => x.utility !== utility); d.daily = d.daily.filter((x) => x.utility !== utility); this._write(d); }
-  view() {
+  view(weather = [], { baseTemp = 65 } = {}) {
     const d = this._read(), out = {};
     const daysMs = 864e5, t = (s) => Date.parse(s + "T00:00:00Z");
     for (const [key, U] of Object.entries(UTILITIES)) {
@@ -144,10 +145,18 @@ export class UtilityStore {
         b.amountPctYoy = prev && prev.amount > 0 && b.amount != null ? b.amount / prev.amount - 1 : null;
         b.flag = (b.usagePctYoy != null && b.usagePctYoy >= 0.3) || (b.amountPctYoy != null && b.amountPctYoy >= 0.3);
         b.perUnit = b.amount != null && b.usage > 0 ? b.amount / b.usage : null;
+        b.ratePctYoy = prev && prev.amount > 0 && prev.usage > 0 && b.perUnit != null ? b.perUnit / (prev.amount / prev.usage) - 1 : null;
       }
+      // Weather over each billing period. A missing start is taken from the previous bill (or 30 days back).
+      bills.forEach((b, i) => {
+        const before = bills[i - 1], start = b.periodStart || (before && t(b.periodEnd) - t(before.periodEnd) <= 45 * daysMs ? new Date(t(before.periodEnd) + daysMs).toISOString().slice(0, 10) : new Date(t(b.periodEnd) - 29 * daysMs).toISOString().slice(0, 10));
+        b.days = Math.round((t(b.periodEnd) - t(start)) / daysMs) + 1;
+        const w = summarizeWeather(weather, start, b.periodEnd, baseTemp);
+        b.wx = w && w.coverage >= 0.8 ? { avgTemp: w.avgTemp, hdd: w.hdd, cdd: w.cdd, precip: w.precip, source: "weather" } : b.tempF != null ? { avgTemp: b.tempF, hdd: null, cdd: null, precip: null, source: "bill" } : null;
+      });
       const daily = d.daily.filter((x) => x.utility === key).map(({ date, usage }) => ({ date, usage }));
       const last = bills.slice(-12), sum = (k) => last.reduce((s, b) => s + (b[k] || 0), 0), withAmt = last.filter((b) => b.amount != null && b.usage > 0);
-      out[key] = { ...U, key, bills, daily, last12: { periods: last.length, usage: sum("usage"), amount: last.some((b) => b.amount != null) ? sum("amount") : null, perUnit: withAmt.length ? withAmt.reduce((s, b) => s + b.amount, 0) / withAmt.reduce((s, b) => s + b.usage, 0) : null } };
+      out[key] = { ...U, key, bills, daily, years: yearTable(bills), last12: { periods: last.length, usage: sum("usage"), amount: last.some((b) => b.amount != null) ? sum("amount") : null, perUnit: withAmt.length ? withAmt.reduce((s, b) => s + b.amount, 0) / withAmt.reduce((s, b) => s + b.usage, 0) : null } };
     }
     return out;
   }
@@ -177,4 +186,33 @@ export function paymentsByMonth(transactions, payeeRegex, opts) {
   const m = new Map();
   for (const t of paymentList(transactions, payeeRegex, opts)) { const k = t.date.slice(0, 7); m.set(k, (m.get(k) || 0) + t.amount); }
   return [...m].map(([month, amount]) => ({ month, amount: Math.round(amount * 100) / 100 })).sort((a, b) => (a.month < b.month ? -1 : 1));
+}
+
+// Year-over-year table. Each year is compared with the one before using only the calendar months both have a bill for,
+// so a partial year is not set against a full one. The cost change is split into "used more or less" (at last year's
+// rate) and "the rate changed" (applied to this year's usage), which add up to the total.
+export function yearTable(bills) {
+  const byYear = new Map();
+  for (const b of bills) { const y = +b.periodEnd.slice(0, 4), m = +b.periodEnd.slice(5, 7); if (!byYear.has(y)) byYear.set(y, new Map()); byYear.get(y).set(m, b); }
+  const sum = (arr, f) => arr.reduce((s, b) => s + (f(b) || 0), 0);
+  const wxOf = (arr) => { const w = arr.filter((b) => b.wx?.source === "weather"); if (!w.length) return null; const days = sum(w, (b) => b.days); return { avgTemp: sum(w, (b) => b.wx.avgTemp * b.days) / days, hdd: sum(w, (b) => b.wx.hdd), cdd: sum(w, (b) => b.wx.cdd), precip: sum(w, (b) => b.wx.precip), bills: w.length }; };
+  const rows = [];
+  for (const [y, months] of [...byYear].sort((a, b) => a[0] - b[0])) {
+    const list = [...months.values()], priced = list.filter((b) => b.usage > 0 && b.amount != null), row = { year: y, months: list.length, usage: sum(list, (b) => b.usage), amount: priced.length ? sum(priced, (b) => b.amount) : null, rate: priced.length ? sum(priced, (b) => b.amount) / sum(priced, (b) => b.usage) : null, wx: wxOf(list), vsPrev: null };
+    const prev = byYear.get(y - 1);
+    if (prev) {
+      const common = [...months.keys()].filter((m) => prev.has(m)), cur = common.map((m) => months.get(m)), old = common.map((m) => prev.get(m));
+      const both = common.filter((m) => months.get(m).usage > 0 && months.get(m).amount != null && prev.get(m).usage > 0 && prev.get(m).amount != null);
+      if (common.length) {
+        const vs = { monthsCompared: common.length, usagePct: sum(old, (b) => b.usage) > 0 ? sum(cur, (b) => b.usage) / sum(old, (b) => b.usage) - 1 : null, costPct: null, ratePct: null, usageEffect: null, rateEffect: null, tempDiff: null, hddPct: null, cddPct: null, precipPct: null };
+        if (both.length) { const c2 = both.map((m) => months.get(m)), c1 = both.map((m) => prev.get(m)), U1 = sum(c1, (b) => b.usage), A1 = sum(c1, (b) => b.amount), U2 = sum(c2, (b) => b.usage), A2 = sum(c2, (b) => b.amount), r1 = A1 / U1, r2 = A2 / U2;
+          Object.assign(vs, { costPct: A2 / A1 - 1, ratePct: r2 / r1 - 1, usageEffect: (U2 - U1) * r1, rateEffect: (r2 - r1) * U2, monthsPriced: both.length }); }
+        const wm = common.filter((m) => months.get(m).wx?.source === "weather" && prev.get(m).wx?.source === "weather"), wc = wxOf(wm.map((m) => months.get(m))), wo = wxOf(wm.map((m) => prev.get(m)));
+        if (wc && wo) Object.assign(vs, { tempDiff: wc.avgTemp - wo.avgTemp, hddPct: wo.hdd > 0 ? wc.hdd / wo.hdd - 1 : null, cddPct: wo.cdd > 0 ? wc.cdd / wo.cdd - 1 : null, precipPct: wo.precip > 0 ? wc.precip / wo.precip - 1 : null });
+        row.vsPrev = vs;
+      }
+    }
+    rows.push(row);
+  }
+  return rows.sort((a, b) => b.year - a.year);
 }

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseGreenButtonXml, parseUtilityCsv, parseRaleighWaterText, importFile, UtilityStore, paymentsByMonth, paymentList, matchBillPayments } from "../src/lib/utilities.js";
+import { WeatherStore, fetchDailyWeather, summarizeWeather } from "../src/lib/weather.js";
 import { createHandlers } from "../src/app.js";
 import { createServer } from "../src/server.js";
 import { SettingsStore } from "../src/config.js";
@@ -83,7 +84,7 @@ test("payments by month from Actual-style transactions", () => {
 
 test("upload route end to end through the HTTP server (raw body)", async () => {
   const dir = tmp();
-  const handlers = createHandlers({ actual: { configured: () => false }, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings: new SettingsStore(path.join(dir, "s.json")), scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), utilities: new UtilityStore(path.join(dir, "u.json")), simplefin: {}, now: () => new Date("2026-11-14T12:00:00Z") });
+  const handlers = createHandlers({ actual: { configured: () => false }, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings: new SettingsStore(path.join(dir, "s.json")), scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), utilities: new UtilityStore(path.join(dir, "u.json")), weather: new WeatherStore(path.join(dir, "w.json")), weatherFetch: async () => ({ ok: true, json: async () => ({ daily: { time: [] } }) }), simplefin: {}, now: () => new Date("2026-11-14T12:00:00Z") });
   const srv = createServer({ handlers, password: "" }).listen(0); await new Promise((r) => srv.once("listening", r));
   const base = `http://127.0.0.1:${srv.address().port}`;
   try {
@@ -125,10 +126,43 @@ test("settings validate the match mode; categories route; payments route honours
   const s = settings.get(); s.utilities.match = "nope"; assert.throws(() => settings.set(s), /utilities.match/);
   const t = [{ id: "t1", accountId: "a", accountName: "Chk", date: "2026-10-05", amount: -88, payeeName: "Some Autopay", importedPayee: "", notes: "", categoryId: "cW", transferAcctId: null }];
   const actual = { configured: () => true, serverUrl: "http://actual", getTransactions: async () => t, getCategories: async () => [{ id: "cW", name: "Water", groupName: "Utilities", isIncome: false, hidden: false }, { id: "cI", name: "Pay", groupName: "Inc", isIncome: true, hidden: false }] };
-  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), utilities: new UtilityStore(path.join(dir, "u.json")), simplefin: {}, now: () => new Date("2026-11-14T12:00:00Z") });
+  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), utilities: new UtilityStore(path.join(dir, "u.json")), weather: new WeatherStore(path.join(dir, "w.json")), weatherFetch: async () => ({ ok: true, json: async () => ({ daily: { time: [] } }) }), simplefin: {}, now: () => new Date("2026-11-14T12:00:00Z") });
   assert.deepEqual(await h["GET /api/categories"]({}), [{ id: "cW", name: "Water", groupName: "Utilities" }]);
   assert.equal((await h["GET /api/utilities/payments"]({})).transactions.water.length, 0, "payee-only by default");
   const cur = settings.get(); cur.utilities.match = "category"; cur.utilities.categories.water = ["cW"]; settings.set(cur);
   const r = await h["GET /api/utilities/payments"]({});
   assert.equal(r.transactions.water.length, 1); assert.equal(r.payments.water[0].amount, 88); assert.equal(r.transactions.electric.length, 0);
+});
+
+const day = (d, t, p = 0) => ({ date: d, tmean: t, tmax: t + 8, tmin: t - 8, precip: p });
+test("weather: fetch parsing, degree days, coverage, store refresh only fetches what is missing", async () => {
+  const calls = [];
+  const fetchImpl = async (url) => { calls.push(String(url)); const u = new URL(url), s = u.searchParams.get("start_date"), e = u.searchParams.get("end_date"); const t = [], m = []; for (let d = Date.parse(s); d <= Date.parse(e); d += 864e5) { t.push(new Date(d).toISOString().slice(0, 10)); m.push(40); } return { ok: true, json: async () => ({ daily: { time: t, temperature_2m_mean: m, temperature_2m_max: m, temperature_2m_min: m, precipitation_sum: m.map(() => 0.1) } }) }; };
+  const rows = await fetchDailyWeather({ lat: 35.78, lon: -78.64, start: "2026-01-01", end: "2026-01-03", fetchImpl });
+  assert.equal(rows.length, 3); assert.match(calls[0], /temperature_unit=fahrenheit/);
+  const w = summarizeWeather([day("2026-01-01", 40, 0.5), day("2026-01-02", 80, 0.5)], "2026-01-01", "2026-01-02", 65);
+  assert.equal(w.hdd, 25); assert.equal(w.cdd, 15); assert.equal(w.avgTemp, 60); assert.equal(w.precip, 1); assert.equal(w.coverage, 1);
+  assert.equal(summarizeWeather([day("2026-01-01", 40)], "2026-01-01", "2026-01-05", 65).coverage, 0.2);
+  const ws = new WeatherStore(path.join(tmp(), "w.json")), loc = { lat: 1, lon: 2, today: "2026-02-20", fetchImpl };
+  await ws.refresh({ ...loc, from: "2026-02-01" }); const n1 = calls.length;
+  assert.equal(ws.last(), "2026-02-14", "stops 6 days before today");
+  await ws.refresh({ ...loc, from: "2026-02-01" }); assert.equal(calls.length, n1, "nothing missing, no request");
+  await ws.refresh({ ...loc, from: "2026-01-28", today: "2026-02-25" }); assert.equal(ws.all()[0].date, "2026-01-28"); assert.equal(ws.last(), "2026-02-19");
+  await ws.refresh({ lat: 9, lon: 9, from: "2026-02-10", today: "2026-02-20", fetchImpl }); assert.equal(ws.all()[0].date, "2026-02-10", "new location starts over");
+  await assert.rejects(fetchDailyWeather({ lat: 1, lon: 1, start: "2026-01-01", end: "2026-01-02", fetchImpl: async () => ({ ok: false, status: 500 }) }), /HTTP 500/);
+});
+
+test("years table: same months only; usage effect plus rate effect equals the cost change; weather deltas", () => {
+  const s = new UtilityStore(path.join(tmp(), "u.json"));
+  const bill = (y, m, usage, amount) => ({ utility: "electric", periodStart: `${y}-${String(m).padStart(2, "0")}-01`, periodEnd: `${y}-${String(m).padStart(2, "0")}-28`, usage, amount });
+  s.addBills([bill(2025, 6, 1000, 100), bill(2025, 7, 1200, 120), bill(2025, 8, 900, 90), bill(2026, 6, 1100, 143), bill(2026, 7, 1200, 156)]);
+  const wx = [];
+  for (const [y, t] of [[2025, 70], [2026, 76]]) for (const m of [6, 7, 8]) for (let d = 1; d <= 28; d++) wx.push(day(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`, t, 0.1));
+  const yt = s.view(wx).electric.years, y26 = yt.find((r) => r.year === 2026), v = y26.vsPrev;
+  assert.equal(v.monthsCompared, 2);
+  assert.ok(Math.abs(v.usagePct - (2300 / 2200 - 1)) < 1e-9); assert.ok(Math.abs(v.ratePct - 0.3) < 1e-9);
+  assert.ok(Math.abs(v.usageEffect + v.rateEffect - (299 - 220)) < 1e-6, "effects add up to the cost change");
+  assert.ok(Math.abs(v.tempDiff - 6) < 1e-9); assert.ok(v.cddPct > 0); assert.equal(v.hddPct, null, "no heating degree days last year");
+  assert.equal(yt.find((r) => r.year === 2025).vsPrev, null);
+  const b = s.view(wx).electric.bills.find((x) => x.periodEnd === "2026-06-28"); assert.equal(b.wx.source, "weather"); assert.ok(Math.abs(b.ratePctYoy - 0.3) < 1e-9);
 });

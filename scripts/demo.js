@@ -6,6 +6,7 @@ import { createHandlers } from "../src/app.js";
 import { createServer } from "../src/server.js";
 import { SettingsStore } from "../src/config.js";
 import { SnapshotStore } from "../src/lib/investments.js";
+import { WeatherStore } from "../src/lib/weather.js";
 import { UtilityStore } from "../src/lib/utilities.js";
 import { BalanceStore } from "../src/lib/networth.js";
 import { AssetStore } from "../src/lib/assets.js";
@@ -61,6 +62,9 @@ const utilities = new UtilityStore(path.join(dir, "utilities.json"));
   const payee = { electric: "Duke Energy", water: "City of Raleigh", gas: "Enbridge Gas" };
   for (const [k, l] of Object.entries(bills)) for (const b of l) { const d = new Date(Date.parse(b.periodEnd + "T00:00:00Z") + (k === "water" ? 20 : 14) * 864e5).toISOString().slice(0, 10); if (d <= today) txns.push({ id: `u-${k}-${b.periodEnd}`, accountId: "chk", accountName: "Checking", date: d, amount: -b.amount, categoryId: { electric: "uel", water: "uwa", gas: "uga" }[k], transferAcctId: null, payeeName: payee[k], importedPayee: "", notes: k === "electric" ? "Autopay" : "" }); }
   const daily = []; for (let k = 120; k >= 1; k--) { const d = new Date(now.getTime() - k * 864e5); daily.push({ date: d.toISOString().slice(0, 10), usage: Math.round((22 + 18 * Math.abs(Math.sin(k / 9)) + (k % 7 === 0 ? 14 : 0)) * 10) / 10 }); } utilities.setDaily("electric", daily); }
+const weather = new WeatherStore(path.join(dir, "weather.json"));
+{ const rows = []; for (let t = Date.parse("2024-08-25"); t <= now.getTime() - 6 * 864e5; t += 864e5) { const d = new Date(t), doy = (t - Date.UTC(d.getUTCFullYear(), 0, 0)) / 864e5, y = d.getUTCFullYear(), base = 60 - 22 * Math.cos(((doy - 15) / 365) * Math.PI * 2), anomaly = y === 2026 && doy > 150 && doy < 260 ? 4 : 0, wob = 5 * Math.sin(doy * 1.7), tm = base + anomaly + wob, wet = (Math.sin(doy * 2.3) > 0.55 ? 0.6 : 0.02) * (y === 2026 ? 0.7 : 1);
+  rows.push({ date: d.toISOString().slice(0, 10), tmean: Math.round(tm * 10) / 10, tmax: tm + 9, tmin: tm - 9, precip: Math.round(wet * 100) / 100 }); } weather.merge(rows, { lat: 35.78, lon: -78.64 }); }
 const balances = new BalanceStore(path.join(dir, "balances.json"));
 { for (let k = 40; k >= 0; k -= 5) { const d = new Date(now.getTime() - k * 864e5).toISOString().slice(0, 10), w = Math.sin(k) * 400;
   balances.record(d, [{ id: "S1", name: "Everyday Checking", org: "Demo Bank", balance: 8200 + w }, { id: "S2", name: "High-yield Savings", org: "Demo Bank", balance: 31000 + (40 - k) * 60 }, { id: "S3", name: "Roth IRA", org: "Demo Brokerage", balance: 52000 + (40 - k) * 150 }, { id: "S4", name: "Taxable Brokerage", org: "Demo Brokerage", balance: 18000 + (40 - k) * 90 }, { id: "S5", name: "Rewards Visa card", org: "Demo Card", balance: -(2100 + w) }, { id: "S6", name: "Home Mortgage", org: "Demo Lender", balance: -(288000 - (40 - k) * 40) }, { id: "S7", name: "Primary home (mirror)", org: "Demo Bank", balance: 640000 }]); } }
@@ -70,7 +74,7 @@ const assets = new AssetStore(path.join(dir, "assets.json"));
   [[300, 600000], [200, 615000], [100, 628000], [10, 640000]].forEach(([k, v]) => assets.setValue(home.id, { date: d(k), value: v }));
   [[330, 34000], [150, 31500], [20, 30200]].forEach(([k, v]) => assets.setValue(car.id, { date: d(k), value: v, note: "KBB trade-in" }));
   [[400, 42000], [120, 38500]].forEach(([k, v]) => assets.setValue(rv.id, { date: d(k), value: v })); }
-const handlers = createHandlers({ balances, utilities, version: JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version, assets, snapshotState: new SnapshotState(path.join(dir, "st.json")), actual, snaptrade: null, store: invStore, settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
+const handlers = createHandlers({ balances, utilities, weather, weatherFetch: async () => ({ ok: true, json: async () => ({ daily: { time: [] } }) }), version: JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version, assets, snapshotState: new SnapshotState(path.join(dir, "st.json")), actual, snaptrade: null, store: invStore, settings, scenarios: new ScenarioStore(path.join(dir, "scenarios.json")),
   simplefin: { accessUrl: "http://demo:demo@127.0.0.1/simplefin", fetchImpl: async () => ({ ok: true, json: async () => sample }) } });
 const port = +process.env.PORT || 3100;
 createServer({ handlers, password: null }).listen(port, "127.0.0.1", () => console.log(`Demo (made-up data) on http://127.0.0.1:${port}`));
