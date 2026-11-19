@@ -11,6 +11,7 @@ import { SnapshotStore } from "../src/lib/investments.js";
 import { ScenarioStore } from "../src/lib/scenarios.js";
 import { BalanceStore } from "../src/lib/networth.js";
 import { AssetStore } from "../src/lib/assets.js";
+import { UtilityStore } from "../src/lib/utilities.js";
 import { FakeActual } from "./fakes.js";
 
 const NOW = new Date("2026-11-14T12:00:00Z");
@@ -35,7 +36,7 @@ function data() {
 function make(over = {}) {
   const dir = tmp(), actual = new FakeActual(data());
   const settings = new SettingsStore(path.join(dir, "s.json"));
-  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), simplefin: { accessUrl: null }, now: () => NOW, ...over });
+  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), utilities: new UtilityStore(path.join(dir, "u.json")), assets: new AssetStore(path.join(dir, "a.json")), simplefin: { accessUrl: null }, now: () => NOW, ...over });
   return { h, actual, settings, dir };
 }
 

@@ -11,6 +11,7 @@ import { addMonths, currentMonth, lastDayOf } from "./lib/dates.js";
 import { computeEstimate } from "./lib/estimate.js";
 import { planExistingLoan } from "./lib/existing.js";
 import { monthsBetween } from "./lib/flows.js";
+import { UTILITIES, importFile, paymentsByMonth } from "./lib/utilities.js";
 import { balancesFromSimpleFIN, KINDS, KIND_LABEL } from "./lib/networth.js";
 import { ASSET_TYPES } from "./lib/assets.js";
 import { extractValue, parseWatchId } from "./adapters/changedetection.js";
@@ -20,7 +21,7 @@ const httpErr = (status, message) => Object.assign(new Error(message), { status 
 const num = (v) => (v === undefined || v === "" || v === null ? null : Number.isFinite(+v) ? +v : null);
 
 export function createHandlers(d) {
-  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, balances, snapshotState, changedetection, fred, notify, version, now = () => new Date() } = d;
+  const { actual, snaptrade, store, settings, simplefin, scenarios, assets, balances, utilities, snapshotState, changedetection, fred, notify, version, now = () => new Date() } = d;
   const month0 = () => currentMonth(now());
   const today = () => localDate(now());
 
@@ -116,6 +117,22 @@ export function createHandlers(d) {
       if (!KINDS.includes(body?.kind)) throw httpErr(400, `Kind must be one of: ${KINDS.join(", ")}.`);
       const s = settings.get(); for (const id of ids) s.networth.kinds[String(id)] = body.kind;
       settings.set(s); return { ok: true };
+    },
+
+    "GET /api/utilities": async () => ({ payees: settings.get().utilities.payees, utilities: utilities.view() }),
+    // Raw file upload (Duke Green Button .xml, .csv, Raleigh water .pdf). The body is the file; ?name= and optional ?utility=.
+    "POST /api/utilities/upload": async ({ query, body }) => {
+      if (!Buffer.isBuffer(body) || !body.length) throw httpErr(400, "No file received.");
+      const r = await importFile(query.name || "", body, { utilityHint: UTILITIES[query.utility] ? query.utility : undefined });
+      const saved = r.daily ? utilities.setDaily(r.utility, r.daily) : utilities.addBills(r.bills);
+      return { utility: r.utility, what: r.what, ...saved };
+    },
+    "POST /api/utilities/clear": async ({ body }) => { if (!UTILITIES[body?.utility]) throw httpErr(400, "Unknown utility."); utilities.remove(body.utility); return { ok: true }; },
+    // What you paid each utility per month, from Actual transactions that match the payee pattern.
+    "GET /api/utilities/payments": async () => {
+      if (!actual.configured()) return { configured: false, payments: {} };
+      const t = now(), start = `${t.getFullYear() - 3}-01-01`, tx = await actual.getTransactions(start, today()), P = settings.get().utilities.payees;
+      return { configured: true, payments: Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, paymentsByMonth(tx, P[k])])) };
     },
 
     "GET /api/reminders": async () => { const R = settings.get().reminders; const items = R.enabled ? assets.due(today(), R.day) : []; return { enabled: R.enabled, day: R.day, count: items.length, items }; },

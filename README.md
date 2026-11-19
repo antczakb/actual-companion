@@ -173,3 +173,12 @@ The nightly job refreshes an estimate when the last one is a week old; "Estimate
 ## v0.1.22: sortable and filterable tables
 
 Outside the Loan tab, click a column heading to sort ascending, then descending, then back to original order. A dropdown under each heading filters to one value (shown when a column has 2 to 30 distinct values). On phones, a "Sort and filter" control above each table does the same. Money and percent text sorts numerically.
+
+## v0.1.23: Utilities tab (electric, water, gas)
+
+- **Import** on the Utilities tab: Duke Energy Green Button XML (15-minute readings, stored as daily kWh), Duke and gas usage CSVs (columns matched by header words), and City of Raleigh water PDF bills. Re-importing a period replaces it, and fields a later import lacks are kept, so a usage CSV and a bill PDF for the same period merge.
+- Only figures are stored. Names, addresses and account numbers in the files are ignored.
+- Per utility: last-12-bills KPIs, usage and cost charts, daily electric usage, a sortable bills table, and a flag when usage or cost is 30% or more above the same period a year earlier.
+- **Paid in Actual**: monthly totals of payments whose payee matches a pattern (Settings, "Payee patterns"; defaults: `duke energy`, `raleigh`, `enbridge|piedmont`).
+- PDF reading needs `pdftotext`; `install-lxc.sh` now installs `poppler-utils`. On an existing container run `apt-get install -y poppler-utils`.
+- Uploads up to 80 MB (the Duke XML is about 23 MB). Duke PDF bills and Enbridge files are not parsed yet: send a redacted sample.

@@ -669,6 +669,51 @@ function networthTab() {
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
 
+// ---------- Utilities ----------
+function utilitiesTab() {
+  const root = $("utilities"), out = h("div"), msgs = h("div"), file = h("input", { type: "file", multiple: true, accept: ".xml,.csv,.pdf,.txt" }), which = h("select", { "aria-label": "Utility for CSV files" }, [["", "Detect automatically"], ["electric", "Electric"], ["water", "Water"], ["gas", "Natural gas"]].map(([v, l]) => h("option", { value: v }, l)));
+  const go = h("button", { class: "act" }, "Import files"), n1 = (v) => (v == null ? "" : (+v).toLocaleString("en-US", { maximumFractionDigits: 1 })), pct = (v) => (v == null ? "" : (v > 0 ? "+" : "") + Math.round(v * 100) + "%");
+  let paid = null, active = "electric";
+  async function upload(f, utility) {
+    const q = new URLSearchParams({ name: f.name }); if (utility) q.set("utility", utility);
+    const r = await fetch("/api/utilities/upload?" + q, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f }), j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`); return j;
+  }
+  go.addEventListener("click", async () => {
+    const files = [...file.files]; if (!files.length) { fill(msgs, h("div", { class: "err" }, "Choose one or more files first.")); return; }
+    go.disabled = true; fill(msgs);
+    for (const f of files) { const row = h("div", { class: "mute" }, `${f.name}: importing...`); msgs.append(row); try { const j = await upload(f, which.value); fill(row, h("span", { class: "ok" }, `${f.name}: ${j.what} (${j.added} new, ${j.updated} updated).`)); } catch (e) { fill(row, h("span", { class: "err" }, `${f.name}: ${e.message}`)); } }
+    file.value = ""; go.disabled = false; await load();
+  });
+  async function load() {
+    const r = await api("/api/utilities"), U = r.utilities, anyData = Object.values(U).some((u) => u.bills.length || u.daily.length);
+    fill(out, !anyData ? h("div", { class: "note" }, "Nothing imported yet. Download your usage or bill from each provider (Duke Energy: the Green Button XML and the usage CSV; City of Raleigh: the PDF bill; Enbridge: its usage CSV) and import it above. Importing the same period again replaces it, so re-uploading is safe.") : null, h("div", { class: "subnav", role: "tablist" }, Object.values(U).map((u) => h("button", { role: "tab", class: u.key === active ? "on" : "", onclick: () => { active = u.key; load(); } }, u.label))), section(U[active]));
+    if (!paid) api("/api/utilities/payments").then((p) => { paid = p; load(); }).catch(() => { paid = { configured: false, payments: {} }; });
+    function section(u) {
+      const tbl = u.bills.length ? table([{ label: "Period end", key: "periodEnd" }, { label: "Period", render: (b) => (b.periodStart ? `${b.periodStart} to ${b.periodEnd}` : b.periodEnd), sort: (b) => b.periodStart || b.periodEnd }, { label: `Usage (${u.unit})`, num: 1, sort: (b) => b.usage ?? -1, render: (b) => n1(b.usage) }, { label: "Cost", num: 1, sort: (b) => b.amount ?? -1, render: (b) => (b.amount == null ? "" : usd(b.amount, 2)) }, { label: `$ per ${u.unit}`, num: 1, sort: (b) => b.perUnit ?? -1, render: (b) => (b.perUnit == null ? "" : usd(b.perUnit, 3)) }, { label: "Avg per day", num: 1, sort: (b) => b.avgPerDay ?? -1, render: (b) => n1(b.avgPerDay) },
+        { label: "Usage vs last year", num: 1, sort: (b) => b.usagePctYoy ?? -9, render: (b) => (b.usagePctYoy == null ? "" : h("span", { class: b.usagePctYoy >= 0.3 ? "down" : "" }, pct(b.usagePctYoy))) }, { label: "Cost vs last year", num: 1, sort: (b) => b.amountPctYoy ?? -9, render: (b) => (b.amountPctYoy == null ? "" : h("span", { class: b.amountPctYoy >= 0.3 ? "down" : "" }, pct(b.amountPctYoy))) }], [...u.bills].reverse(), { maxRows: 240, stack: false }) : null;
+      const labels = u.bills.map((b) => b.periodEnd.slice(0, 7)), flagged = u.bills.filter((b) => b.flag).slice(-3).reverse();
+      const costVals = u.bills.map((b) => (b.amount == null ? null : b.amount));
+      const pays = paid?.payments?.[u.key] || [], last12 = pays.slice(-12), paidTotal = last12.reduce((s, x) => s + x.amount, 0);
+      const days = u.daily.slice(-120);
+      return h("div", { class: "card util" }, h("h2", {}, u.label, h("small", { class: "mute" }, " " + u.provider)),
+        h("div", { class: "kpis" }, h("div", { class: "kpi" }, h("b", {}, u.last12.usage ? n1(u.last12.usage) : "-"), h("span", {}, `${u.unit} in the last ${u.last12.periods || 0} bills`)), h("div", { class: "kpi" }, h("b", {}, u.last12.amount != null ? usd(u.last12.amount) : "-"), h("span", {}, "Billed, same bills")), h("div", { class: "kpi" }, h("b", {}, u.last12.perUnit != null ? usd(u.last12.perUnit, 3) : "-"), h("span", {}, `Average $ per ${u.unit}`)), paid?.configured && pays.length ? h("div", { class: "kpi" }, h("b", {}, usd(paidTotal)), h("span", {}, "Paid in Actual, last 12 months")) : null),
+        flagged.length ? h("div", { class: "warn" }, "Higher than the same time last year: " + flagged.map((b) => `${b.periodEnd.slice(0, 7)} (${[b.usagePctYoy >= 0.3 ? `usage ${pct(b.usagePctYoy)}` : null, b.amountPctYoy >= 0.3 ? `cost ${pct(b.amountPctYoy)}` : null].filter(Boolean).join(", ")})`).join("; ")) : null,
+        h("div", { class: "chartgrid" },
+          u.bills.filter((b) => b.usage != null).length > 1 ? h("div", {}, h("h3", {}, `Usage per billing period (${u.unit})`), lineChart([{ name: `${u.label} usage`, color: "#1f5fbf", values: u.bills.map((b) => b.usage ?? null) }], labels, { money: false })) : null,
+          costVals.filter((v) => v != null).length > 1 ? h("div", {}, h("h3", {}, "Cost per billing period"), lineChart([{ name: "Billed", color: "#c55a11", values: costVals }], labels)) : null,
+          days.length > 1 ? h("div", {}, h("h3", {}, `Daily usage, last ${days.length} days (${u.unit})`), lineChart([{ name: "Daily", color: "#8a3ffc", values: days.map((d) => d.usage) }], days.map((d) => d.date), { money: false })) : null,
+          pays.length > 1 ? h("div", {}, h("h3", {}, "Paid per month (from Actual)"), lineChart([{ name: "Paid", color: "#1a7f37", values: pays.map((x) => x.amount) }], pays.map((x) => x.month))) : null),
+        paid && !paid.configured ? h("div", { class: "mute" }, "Connect Actual to see what you paid each month.") : null,
+        tbl || h("div", { class: "mute" }, "No bills imported yet."),
+        u.bills.length || u.daily.length ? h("div", { class: "row actions" }, h("button", { class: "alt", onclick: async () => { if (confirm(`Remove all imported ${u.label.toLowerCase()} data? Your files are not touched.`)) { await api("/api/utilities/clear", { body: { utility: u.key } }); await load(); } } }, `Remove ${u.label.toLowerCase()} data`)) : null);
+    }
+  }
+  settingsBar(root, { title: "Payee patterns", fields: [{ path: "utilities.payees.electric", label: "Electric payee pattern", type: "text", tip: "Matches the payee name in Actual (case does not matter). Used to total what you paid." }, { path: "utilities.payees.water", label: "Water payee pattern", type: "text" }, { path: "utilities.payees.gas", label: "Gas payee pattern", type: "text" }], extra: null });
+  root.append(h("div", { class: "card" }, h("h2", {}, "Import bills and usage"), h("div", { class: "row fields" }, h("label", {}, h("span", { class: "lbl" }, "Files (.xml, .csv, .pdf)"), file), h("label", {}, h("span", { class: "lbl" }, "Utility, for CSV files"), which), go), h("div", { class: "mute" }, "Duke Green Button XML (15-minute readings, becomes daily totals), Duke and gas usage CSVs, and Raleigh water PDF bills. Files are read on the server and only the figures are kept; names, addresses and account numbers are not stored."), msgs), out);
+  load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
+}
+
 // ---------- SimpleFIN ----------
 function simplefinTab() {
   settingsBar($("simplefin"), { fields: [
@@ -947,7 +992,7 @@ async function refreshReminder() {
 
 // ---------- shell ----------
 const loaded = {};
-const inits = { loan: loanTab, budget: budgetTab, invest: investTab, networth: networthTab, assets: assetsTab, simplefin: simplefinTab, venmo: venmoTab, amazon: amazonTab };
+const inits = { loan: loanTab, budget: budgetTab, invest: investTab, networth: networthTab, assets: assetsTab, utilities: utilitiesTab, simplefin: simplefinTab, venmo: venmoTab, amazon: amazonTab };
 async function show(name) {
   document.body.dataset.tab = name;
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));

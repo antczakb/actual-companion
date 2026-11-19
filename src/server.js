@@ -12,6 +12,7 @@ import { ChangeDetectionAdapter } from "./adapters/changedetection.js";
 import { NotifyAdapter } from "./adapters/notify.js";
 import { FredAdapter } from "./adapters/fred.js";
 import { BalanceStore } from "./lib/networth.js";
+import { UtilityStore } from "./lib/utilities.js";
 import { AssetStore } from "./lib/assets.js";
 import { SnapshotState, createSnapshotJob } from "./lib/schedule.js";
 import { ActualAdapter } from "./adapters/actual.js";
@@ -28,7 +29,7 @@ export function checkAuth(header, password) {
   return crypto.timingSafeEqual(a, b);
 }
 
-export function createServer({ handlers, password, publicDir = PUBLIC, maxBody = 5 * 1024 * 1024 }) {
+export function createServer({ handlers, password, publicDir = PUBLIC, maxBody = 5 * 1024 * 1024, maxUpload = 80 * 1024 * 1024 }) {
   return http.createServer(async (req, res) => {
     const send = (status, body, type = "application/json; charset=utf-8", extra = {}) => {
       res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", ...extra });
@@ -42,9 +43,10 @@ export function createServer({ handlers, password, publicDir = PUBLIC, maxBody =
         if (!h) return send(404, { error: "Not found" });
         let body = null;
         if (req.method === "POST" || req.method === "PUT") {
-          const chunks = []; let n = 0;
-          for await (const c of req) { n += c.length; if (n > maxBody) { req.resume(); return send(413, { error: "Request too large" }, undefined, { Connection: "close" }); } chunks.push(c); }
-          try { body = JSON.parse(Buffer.concat(chunks).toString() || "null"); } catch { return send(400, { error: "Body must be JSON" }); }
+          const chunks = []; let n = 0, raw = /^application\/octet-stream/i.test(req.headers["content-type"] || "");
+          for await (const c of req) { n += c.length; if (n > (raw ? maxUpload : maxBody)) { req.resume(); return send(413, { error: "Request too large" }, undefined, { Connection: "close" }); } chunks.push(c); }
+          if (raw) body = Buffer.concat(chunks);
+          else try { body = JSON.parse(Buffer.concat(chunks).toString() || "null"); } catch { return send(400, { error: "Body must be JSON" }); }
         }
         return send(200, await h({ query: Object.fromEntries(url.searchParams), body }));
       }
@@ -71,6 +73,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     settings: settingsStore,
     scenarios: new ScenarioStore(path.join(dataDir, "scenarios.json")),
     balances: new BalanceStore(path.join(dataDir, "balances.json")),
+    utilities: new UtilityStore(path.join(dataDir, "utilities.json")),
     assets: new AssetStore(path.join(dataDir, "assets.json")),
     snapshotState,
     notify: new NotifyAdapter({ url: E.NOTIFY_URL }),
