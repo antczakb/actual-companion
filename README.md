@@ -182,3 +182,8 @@ Outside the Loan tab, click a column heading to sort ascending, then descending,
 - **Paid in Actual**: monthly totals of payments whose payee matches a pattern (Settings, "Payee patterns"; defaults: `duke energy`, `raleigh`, `enbridge|piedmont`).
 - PDF reading needs `pdftotext`; `install-lxc.sh` now installs `poppler-utils`. On an existing container run `apt-get install -y poppler-utils`.
 - Uploads up to 80 MB (the Duke XML is about 23 MB). Duke PDF bills and Enbridge files are not parsed yet: send a redacted sample.
+
+## v0.1.24
+
+- **Utilities: see the payment behind a chart point.** Click a point on the usage, cost or "Paid per month" chart, or a period end in the bills table. A panel shows the matching payment(s) from Actual (date, payee, account, amount, notes) with a link to the account in Actual. Actual cannot link to a single transaction, so the details are shown here. Bills match payments dated from 5 days before the period end to 50 days after, closest in amount first.
+- **Fix (issue #3):** the "Time to update ..." banner now clears when a value is pulled from changedetection.io (not only when typed by hand), and it refreshes right after any change on the Assets tab. Automatic estimates still do not count as checking the value.

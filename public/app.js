@@ -85,6 +85,7 @@ function table(cols, rows, { rowClass, maxRows = 2000, stack } = {}) {
 }
 // Hover/tap tooltip for charts: shows the label and every series' value at the nearest point. xs = pixel x of each point in viewBox units.
 function chartHover(wrap, svg, W, xs, rows, hi) {
+  if (hi.onPick) { svg.style.cursor = "pointer"; svg.addEventListener("click", (ev) => { const r = svg.getBoundingClientRect(), x = ((ev.clientX - r.left) / r.width) * W; let b = 0, bd = Infinity; xs.forEach((px, i) => { const d = Math.abs(px - x); if (d < bd) { bd = d; b = i; } }); hi.onPick(b); }); }
   const tipEl = h("div", { class: "charttip", hidden: true }), guide = document.createElementNS("http://www.w3.org/2000/svg", "line");
   guide.setAttribute("stroke", "currentColor"); guide.setAttribute("stroke-opacity", ".35"); guide.setAttribute("stroke-dasharray", "3 3"); guide.setAttribute("y1", hi.T); guide.setAttribute("y2", hi.bottom); guide.style.display = "none"; guide.style.pointerEvents = "none";
   svg.append(guide); wrap.style.position = "relative"; wrap.append(tipEl);
@@ -101,7 +102,7 @@ function chartHover(wrap, svg, W, xs, rows, hi) {
   svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", off);
   svg.addEventListener("pointerup", (ev) => { if (ev.pointerType !== "mouse") setTimeout(off, 2500); });
 }
-function lineChart(series, labels, { money = true } = {}) {
+function lineChart(series, labels, { money = true, onPick = null } = {}) {
   const W = 900, H = 260, L = 64, R = 12, T = 12, B = 26;
   const all = series.flatMap((s) => s.values).filter((v) => v != null);
   if (!all.length) return h("div", { class: "mute" }, "No data yet.");
@@ -120,7 +121,7 @@ function lineChart(series, labels, { money = true } = {}) {
   }
   const wrap = h("div", {}, svg, h("div", { class: "legend" }, series.map((s) => h("span", {}, h("i", { style: `background:${s.color}` }), s.name))));
   const fmt = (v) => (v == null ? "n/a" : money ? usd(v) : String(Math.round(v * 100) / 100));
-  chartHover(wrap, svg, W, labels.map((_, i) => X(i)), (i) => ({ title: labels[i], lines: series.filter((s) => s.values[i] != null).map((s) => ({ name: s.name, color: s.color, value: fmt(s.values[i]) })) }), { T, bottom: H - B });
+  chartHover(wrap, svg, W, labels.map((_, i) => X(i)), (i) => ({ title: labels[i], lines: series.filter((s) => s.values[i] != null).map((s) => ({ name: s.name, color: s.color, value: fmt(s.values[i]) })) }), { T, bottom: H - B, onPick });
   svg.style.touchAction = "pan-y";
   return wrap;
 }
@@ -690,7 +691,19 @@ function utilitiesTab() {
     fill(out, !anyData ? h("div", { class: "note" }, "Nothing imported yet. Download your usage or bill from each provider (Duke Energy: the Green Button XML and the usage CSV; City of Raleigh: the PDF bill; Enbridge: its usage CSV) and import it above. Importing the same period again replaces it, so re-uploading is safe.") : null, h("div", { class: "subnav", role: "tablist" }, Object.values(U).map((u) => h("button", { role: "tab", class: u.key === active ? "on" : "", onclick: () => { active = u.key; load(); } }, u.label))), section(U[active]));
     if (!paid) api("/api/utilities/payments").then((p) => { paid = p; load(); }).catch(() => { paid = { configured: false, payments: {} }; });
     function section(u) {
-      const tbl = u.bills.length ? table([{ label: "Period end", key: "periodEnd" }, { label: "Period", render: (b) => (b.periodStart ? `${b.periodStart} to ${b.periodEnd}` : b.periodEnd), sort: (b) => b.periodStart || b.periodEnd }, { label: `Usage (${u.unit})`, num: 1, sort: (b) => b.usage ?? -1, render: (b) => n1(b.usage) }, { label: "Cost", num: 1, sort: (b) => b.amount ?? -1, render: (b) => (b.amount == null ? "" : usd(b.amount, 2)) }, { label: `$ per ${u.unit}`, num: 1, sort: (b) => b.perUnit ?? -1, render: (b) => (b.perUnit == null ? "" : usd(b.perUnit, 3)) }, { label: "Avg per day", num: 1, sort: (b) => b.avgPerDay ?? -1, render: (b) => n1(b.avgPerDay) },
+      const detail = h("div"), txs = paid?.transactions?.[u.key] || [], byId = new Map(txs.map((t) => [t.id, t]));
+      const txTable = (list) => (list.length ? table([{ label: "Date", key: "date" }, { label: "Payee", key: "payeeName" }, { label: "Account", key: "accountName" }, { label: "Paid", num: 1, render: (t) => usd(t.amount, 2), sort: (t) => t.amount }, { label: "Notes", key: "notes" }, { label: "", render: (t) => (paid.actualUrl && t.accountId ? h("a", { href: `${paid.actualUrl}/accounts/${t.accountId}`, target: "_blank", rel: "noopener" }, "Open account in Actual") : "") }], list, { stack: false }) : null);
+      const shown = (...kids) => { fill(detail, h("div", { class: "card detail" }, h("div", { class: "row" }, kids[0], h("button", { class: "alt", onclick: () => fill(detail) }, "Close")), ...kids.slice(1))); detail.scrollIntoView({ block: "nearest", behavior: "smooth" }); };
+      const hint = h("div", { class: "mute" }, "Actual has no link to a single transaction, so this shows its details here and links to the account it was paid from.");
+      const showBill = (b) => {
+        if (!paid) return shown(h("b", {}, "Loading payments from Actual..."));
+        if (!paid.configured) return shown(h("b", {}, `${u.label} bill ending ${b.periodEnd}`), h("div", { class: "mute" }, "Connect Actual to see the payment for this bill."));
+        const m = (paid.matches?.[u.key]?.[b.periodEnd] || []).map((id) => byId.get(id)).filter(Boolean);
+        shown(h("b", {}, `${u.label} bill, ${b.periodStart ? b.periodStart + " to " : "ending "}${b.periodEnd}`), h("div", { class: "mute" }, [b.usage != null ? `${n1(b.usage)} ${u.unit}` : null, b.amount != null ? `billed ${usd(b.amount, 2)}` : null, b.dueDate ? `due ${b.dueDate}` : null].filter(Boolean).join(", ")),
+          m.length ? [h("div", {}, m.length === 1 ? "Payment in Actual:" : `Likely payments in Actual (closest in amount first):`), txTable(m)] : h("div", { class: "mute" }, `No payment matching this bill was found in Actual between ${b.periodEnd} and 50 days after it. Check the payee pattern in Settings (now "${r.payees[u.key]}").`), hint);
+      };
+      const showMonth = (month) => { const m = txs.filter((t) => t.date.slice(0, 7) === month); shown(h("b", {}, `${u.label} payments in ${month}: ${usd(m.reduce((s, t) => s + t.amount, 0), 2)}`), txTable(m) || h("div", { class: "mute" }, "None."), hint); };
+      const tbl = u.bills.length ? table([{ label: "Period end", render: (b) => h("button", { class: "linkish", title: "Show the payment for this bill", onclick: () => showBill(b) }, b.periodEnd), sort: (b) => b.periodEnd }, { label: "Period", render: (b) => (b.periodStart ? `${b.periodStart} to ${b.periodEnd}` : b.periodEnd), sort: (b) => b.periodStart || b.periodEnd }, { label: `Usage (${u.unit})`, num: 1, sort: (b) => b.usage ?? -1, render: (b) => n1(b.usage) }, { label: "Cost", num: 1, sort: (b) => b.amount ?? -1, render: (b) => (b.amount == null ? "" : usd(b.amount, 2)) }, { label: `$ per ${u.unit}`, num: 1, sort: (b) => b.perUnit ?? -1, render: (b) => (b.perUnit == null ? "" : usd(b.perUnit, 3)) }, { label: "Avg per day", num: 1, sort: (b) => b.avgPerDay ?? -1, render: (b) => n1(b.avgPerDay) },
         { label: "Usage vs last year", num: 1, sort: (b) => b.usagePctYoy ?? -9, render: (b) => (b.usagePctYoy == null ? "" : h("span", { class: b.usagePctYoy >= 0.3 ? "down" : "" }, pct(b.usagePctYoy))) }, { label: "Cost vs last year", num: 1, sort: (b) => b.amountPctYoy ?? -9, render: (b) => (b.amountPctYoy == null ? "" : h("span", { class: b.amountPctYoy >= 0.3 ? "down" : "" }, pct(b.amountPctYoy))) }], [...u.bills].reverse(), { maxRows: 240, stack: false }) : null;
       const labels = u.bills.map((b) => b.periodEnd.slice(0, 7)), flagged = u.bills.filter((b) => b.flag).slice(-3).reverse();
       const costVals = u.bills.map((b) => (b.amount == null ? null : b.amount));
@@ -700,10 +713,11 @@ function utilitiesTab() {
         h("div", { class: "kpis" }, h("div", { class: "kpi" }, h("b", {}, u.last12.usage ? n1(u.last12.usage) : "-"), h("span", {}, `${u.unit} in the last ${u.last12.periods || 0} bills`)), h("div", { class: "kpi" }, h("b", {}, u.last12.amount != null ? usd(u.last12.amount) : "-"), h("span", {}, "Billed, same bills")), h("div", { class: "kpi" }, h("b", {}, u.last12.perUnit != null ? usd(u.last12.perUnit, 3) : "-"), h("span", {}, `Average $ per ${u.unit}`)), paid?.configured && pays.length ? h("div", { class: "kpi" }, h("b", {}, usd(paidTotal)), h("span", {}, "Paid in Actual, last 12 months")) : null),
         flagged.length ? h("div", { class: "warn" }, "Higher than the same time last year: " + flagged.map((b) => `${b.periodEnd.slice(0, 7)} (${[b.usagePctYoy >= 0.3 ? `usage ${pct(b.usagePctYoy)}` : null, b.amountPctYoy >= 0.3 ? `cost ${pct(b.amountPctYoy)}` : null].filter(Boolean).join(", ")})`).join("; ")) : null,
         h("div", { class: "chartgrid" },
-          u.bills.filter((b) => b.usage != null).length > 1 ? h("div", {}, h("h3", {}, `Usage per billing period (${u.unit})`), lineChart([{ name: `${u.label} usage`, color: "#1f5fbf", values: u.bills.map((b) => b.usage ?? null) }], labels, { money: false })) : null,
-          costVals.filter((v) => v != null).length > 1 ? h("div", {}, h("h3", {}, "Cost per billing period"), lineChart([{ name: "Billed", color: "#c55a11", values: costVals }], labels)) : null,
+          u.bills.filter((b) => b.usage != null).length > 1 ? h("div", {}, h("h3", {}, `Usage per billing period (${u.unit})`), lineChart([{ name: `${u.label} usage`, color: "#1f5fbf", values: u.bills.map((b) => b.usage ?? null) }], labels, { money: false, onPick: (i) => showBill(u.bills[i]) })) : null,
+          costVals.filter((v) => v != null).length > 1 ? h("div", {}, h("h3", {}, "Cost per billing period"), lineChart([{ name: "Billed", color: "#c55a11", values: costVals }], labels, { onPick: (i) => showBill(u.bills[i]) })) : null,
           days.length > 1 ? h("div", {}, h("h3", {}, `Daily usage, last ${days.length} days (${u.unit})`), lineChart([{ name: "Daily", color: "#8a3ffc", values: days.map((d) => d.usage) }], days.map((d) => d.date), { money: false })) : null,
-          pays.length > 1 ? h("div", {}, h("h3", {}, "Paid per month (from Actual)"), lineChart([{ name: "Paid", color: "#1a7f37", values: pays.map((x) => x.amount) }], pays.map((x) => x.month))) : null),
+          pays.length > 1 ? h("div", {}, h("h3", {}, "Paid per month (from Actual)"), lineChart([{ name: "Paid", color: "#1a7f37", values: pays.map((x) => x.amount) }], pays.map((x) => x.month), { onPick: (i) => showMonth(pays[i].month) })) : null),
+        h("div", { class: "mute" }, "Click a point on a chart, or a period end in the table, to see the payment behind it."), detail,
         paid && !paid.configured ? h("div", { class: "mute" }, "Connect Actual to see what you paid each month.") : null,
         tbl || h("div", { class: "mute" }, "No bills imported yet."),
         u.bills.length || u.daily.length ? h("div", { class: "row actions" }, h("button", { class: "alt", onclick: async () => { if (confirm(`Remove all imported ${u.label.toLowerCase()} data? Your files are not touched.`)) { await api("/api/utilities/clear", { body: { utility: u.key } }); await load(); } } }, `Remove ${u.label.toLowerCase()} data`)) : null);
@@ -937,6 +951,7 @@ function assetsTab() {
 
   async function load() {
     const [r, accts] = await Promise.all([api("/api/assets"), api("/api/accounts").catch(() => [])]); accounts = accts; cdOn = r.changedetection; fredOn = r.fred; try { due = new Set((await api("/api/reminders")).items.map((x) => x.id)); } catch { due = new Set(); } refreshReminder();
+    refreshReminder(); // the banner at the top must follow every change made here (a pulled value clears it)
     const total = r.assets.reduce((s, a) => s + (a.current ? a.current.value : 0), 0);
     const addBox = h("div"), addBtn = h("button", { class: "act", onclick: () => fill(addBox, assetForm(null, () => load())) }, "+ Add asset");
     fill(out,

@@ -11,7 +11,7 @@ import { addMonths, currentMonth, lastDayOf } from "./lib/dates.js";
 import { computeEstimate } from "./lib/estimate.js";
 import { planExistingLoan } from "./lib/existing.js";
 import { monthsBetween } from "./lib/flows.js";
-import { UTILITIES, importFile, paymentsByMonth } from "./lib/utilities.js";
+import { UTILITIES, importFile, paymentsByMonth, paymentList, matchBillPayments } from "./lib/utilities.js";
 import { balancesFromSimpleFIN, KINDS, KIND_LABEL } from "./lib/networth.js";
 import { ASSET_TYPES } from "./lib/assets.js";
 import { extractValue, parseWatchId } from "./adapters/changedetection.js";
@@ -132,7 +132,9 @@ export function createHandlers(d) {
     "GET /api/utilities/payments": async () => {
       if (!actual.configured()) return { configured: false, payments: {} };
       const t = now(), start = `${t.getFullYear() - 3}-01-01`, tx = await actual.getTransactions(start, today()), P = settings.get().utilities.payees;
-      return { configured: true, payments: Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, paymentsByMonth(tx, P[k])])) };
+      const view = utilities.view(), list = Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, paymentList(tx, P[k])]));
+      return { configured: true, actualUrl: actual.serverUrl || null, payments: Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, paymentsByMonth(tx, P[k])])), transactions: list,
+        matches: Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, Object.fromEntries(view[k].bills.map((b) => [b.periodEnd, matchBillPayments(b, list[k])]))])) };
     },
 
     "GET /api/reminders": async () => { const R = settings.get().reminders; const items = R.enabled ? assets.due(today(), R.day) : []; return { enabled: R.enabled, day: R.day, count: items.length, items }; },

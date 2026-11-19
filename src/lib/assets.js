@@ -58,7 +58,7 @@ export class AssetStore {
   due(todayIso, reminderDay = 1) {
     const month = todayIso.slice(0, 7), day = +todayIso.slice(8, 10);
     if (day < reminderDay) return [];
-    return this.list().filter((a) => a.remind !== false && !a.actualAccount && !a.values.some((v) => (v.source || "manual") === "manual" && v.date.slice(0, 7) === month))
+    return this.list().filter((a) => a.remind !== false && !a.actualAccount && !a.values.some((v) => (v.source || "manual") !== "estimate" && v.date.slice(0, 7) === month))
       .map((a) => ({ id: a.id, name: a.name, type: a.type, lookupUrl: a.lookupUrl || "", lastManual: [...a.values].reverse().find((v) => (v.source || "manual") === "manual")?.date || null }));
   }
   view(todayIso) {

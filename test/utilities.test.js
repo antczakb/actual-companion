@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { parseGreenButtonXml, parseUtilityCsv, parseRaleighWaterText, importFile, UtilityStore, paymentsByMonth } from "../src/lib/utilities.js";
+import { parseGreenButtonXml, parseUtilityCsv, parseRaleighWaterText, importFile, UtilityStore, paymentsByMonth, paymentList, matchBillPayments } from "../src/lib/utilities.js";
 import { createHandlers } from "../src/app.js";
 import { createServer } from "../src/server.js";
 import { SettingsStore } from "../src/config.js";
@@ -97,4 +97,13 @@ test("upload route end to end through the HTTP server (raw body)", async () => {
     assert.equal(v.utilities.electric.bills.length, 3); assert.equal(v.utilities.electric.daily.length, 1);
     assert.deepEqual(await (await fetch(`${base}/api/utilities/payments`)).json(), { configured: false, payments: {} });
   } finally { srv.close(); }
+});
+
+test("matchBillPayments: window after the period end, closest amount first, water uses the bill total too", () => {
+  const tx = [{ date: "2026-10-03", amount: -140.5, payeeName: "Duke Energy", id: "a", accountId: "x" }, { date: "2026-10-30", amount: -300, payeeName: "Duke Energy", id: "b" }, { date: "2026-11-02", amount: -141, payeeName: "Duke Energy", id: "c" }, { date: "2027-02-01", amount: -140.5, payeeName: "Duke Energy", id: "d" }];
+  const pays = paymentList(tx, "duke");
+  assert.equal(pays[0].accountId, "x");
+  assert.deepEqual(matchBillPayments({ periodEnd: "2026-10-01", amount: 140 }, pays), ["c", "a"].sort((x, y) => Math.abs(pays.find((p) => p.id === x).amount - 140) - Math.abs(pays.find((p) => p.id === y).amount - 140)));
+  assert.deepEqual(matchBillPayments({ periodEnd: "2026-10-01", amount: 401.35, totalDue: 501.35 }, paymentList([{ date: "2026-10-10", amount: -501.35, payeeName: "Raleigh", id: "w" }], "raleigh")), ["w"]);
+  assert.deepEqual(matchBillPayments({ periodEnd: "2026-10-01", amount: null }, pays), ["a", "b", "c"]);
 });

@@ -154,9 +154,22 @@ export class UtilityStore {
 }
 
 // Monthly totals paid to a utility, from Actual transactions whose payee matches a pattern (outflows only).
-export function paymentsByMonth(transactions, payeeRegex) {
+export function paymentList(transactions, payeeRegex) {
   let re; try { re = new RegExp(payeeRegex || "(?!)", "i"); } catch { return []; }
+  return transactions.filter((t) => t.amount < 0 && !t.transferAcctId && re.test(`${t.payeeName || ""} ${t.importedPayee || ""}`))
+    .map((t) => ({ id: t.id, date: t.date, amount: Math.round(-t.amount * 100) / 100, payeeName: t.payeeName || t.importedPayee || "", accountId: t.accountId || null, accountName: t.accountName || "", notes: t.notes || "" }))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+// Which payments probably settled a bill: dated from just before the period end to 50 days after, closest in amount first.
+export function matchBillPayments(bill, payments) {
+  const t = (d) => Date.parse(d + "T00:00:00Z"), lo = t(bill.periodEnd) - 5 * 864e5, hi = t(bill.periodEnd) + 50 * 864e5;
+  const inWindow = payments.filter((p) => t(p.date) >= lo && t(p.date) <= hi), targets = [bill.amount, bill.totalDue].filter((v) => v != null);
+  if (!targets.length) return inWindow.map((p) => p.id);
+  const diff = (p) => Math.min(...targets.map((v) => Math.abs(p.amount - v)));
+  return inWindow.filter((p) => diff(p) <= Math.max(5, 0.25 * Math.max(...targets))).sort((a, b) => diff(a) - diff(b)).map((p) => p.id);
+}
+export function paymentsByMonth(transactions, payeeRegex) {
   const m = new Map();
-  for (const t of transactions) if (t.amount < 0 && !t.transferAcctId && re.test(`${t.payeeName || ""} ${t.importedPayee || ""}`)) { const k = t.date.slice(0, 7); m.set(k, (m.get(k) || 0) + -t.amount); }
+  for (const t of paymentList(transactions, payeeRegex)) { const k = t.date.slice(0, 7); m.set(k, (m.get(k) || 0) + t.amount); }
   return [...m].map(([month, amount]) => ({ month, amount: Math.round(amount * 100) / 100 })).sort((a, b) => (a.month < b.month ? -1 : 1));
 }

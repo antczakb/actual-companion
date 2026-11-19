@@ -150,6 +150,8 @@ test("reminders: due until a value is entered by hand this month; Actual-linked 
   assets.setValue(car.id, { date: "2026-11-03", value: 30000, source: "estimate" }); // an estimate does not count as checking it
   assert.deepEqual(assets.due("2026-11-10", 1).map((x) => x.name), ["Car"]);
   assert.deepEqual(assets.due("2026-12-02", 1).map((x) => x.name).sort(), ["Car", "House"], "new month, due again");
+  assets.setValue(car.id, { date: "2026-11-12", value: 29500, source: "changedetection" }); // a value pulled from changedetection.io clears the reminder (issue #3)
+  assert.deepEqual(assets.due("2026-11-13", 1), []);
   assert.throws(() => assets.upsert({ id: home.id, name: "House", type: "home", lookupUrl: "javascript:alert(1)" }), /http/);
   assert.equal(assets.list().find((a) => a.id === home.id).lookupUrl, "https://www.zillow.com/homedetails/x");
 });
