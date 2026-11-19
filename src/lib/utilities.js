@@ -154,10 +154,15 @@ export class UtilityStore {
 }
 
 // Monthly totals paid to a utility, from Actual transactions whose payee matches a pattern (outflows only).
-export function paymentList(transactions, payeeRegex) {
-  let re; try { re = new RegExp(payeeRegex || "(?!)", "i"); } catch { return []; }
-  return transactions.filter((t) => t.amount < 0 && !t.transferAcctId && re.test(`${t.payeeName || ""} ${t.importedPayee || ""}`))
-    .map((t) => ({ id: t.id, date: t.date, amount: Math.round(-t.amount * 100) / 100, payeeName: t.payeeName || t.importedPayee || "", accountId: t.accountId || null, accountName: t.accountName || "", notes: t.notes || "" }))
+// How a payment is recognised: by payee name, by Actual category, either one, or both at once.
+export const MATCH_MODES = ["payee", "category", "either", "both"];
+export function paymentList(transactions, payeeRegex, { categoryIds = [], match = "payee" } = {}) {
+  let re = null; try { if (payeeRegex) re = new RegExp(payeeRegex, "i"); } catch { return []; }
+  const cats = new Set(categoryIds || []);
+  const ok = (t) => { const p = !!re && re.test(`${t.payeeName || ""} ${t.importedPayee || ""}`), c = !!t.categoryId && cats.has(t.categoryId);
+    return match === "category" ? c : match === "either" ? p || c : match === "both" ? p && c : p; };
+  return transactions.filter((t) => t.amount < 0 && !t.transferAcctId && ok(t))
+    .map((t) => ({ id: t.id, date: t.date, categoryId: t.categoryId || null, amount: Math.round(-t.amount * 100) / 100, payeeName: t.payeeName || t.importedPayee || "", accountId: t.accountId || null, accountName: t.accountName || "", notes: t.notes || "" }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 // Which payments probably settled a bill: dated from just before the period end to 50 days after, closest in amount first.
@@ -168,8 +173,8 @@ export function matchBillPayments(bill, payments) {
   const diff = (p) => Math.min(...targets.map((v) => Math.abs(p.amount - v)));
   return inWindow.filter((p) => diff(p) <= Math.max(5, 0.25 * Math.max(...targets))).sort((a, b) => diff(a) - diff(b)).map((p) => p.id);
 }
-export function paymentsByMonth(transactions, payeeRegex) {
+export function paymentsByMonth(transactions, payeeRegex, opts) {
   const m = new Map();
-  for (const t of paymentList(transactions, payeeRegex)) { const k = t.date.slice(0, 7); m.set(k, (m.get(k) || 0) + t.amount); }
+  for (const t of paymentList(transactions, payeeRegex, opts)) { const k = t.date.slice(0, 7); m.set(k, (m.get(k) || 0) + t.amount); }
   return [...m].map(([month, amount]) => ({ month, amount: Math.round(amount * 100) / 100 })).sort((a, b) => (a.month < b.month ? -1 : 1));
 }

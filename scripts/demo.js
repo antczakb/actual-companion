@@ -30,7 +30,7 @@ for (let b = 1; b <= 14; b++) {
 }
 const actual = new FakeActual({
   accounts: [{ id: "chk", name: "Checking", offbudget: false, closed: false, balance: 24000 }, { id: "brk", name: "Brokerage", offbudget: true, closed: false, balance: 90000 }, { id: "hs", name: "House", offbudget: true, closed: false, balance: 640000 }, { id: "mg", name: "Home Mortgage", offbudget: true, closed: false, balance: -286500 }],
-  categories: [{ id: "pay", name: "Paycheck", groupName: "Income", isIncome: true }, { id: "groc", name: "Groceries", groupName: "Food", isIncome: false }, { id: "rent", name: "Mortgage", groupName: "Housing", isIncome: false }, { id: "gift", name: "Gifts", groupName: "Fun", isIncome: false }, { id: "dine", name: "Dining", groupName: "Food", isIncome: false }],
+  categories: [{ id: "uel", name: "Electric", groupName: "Utilities", isIncome: false }, { id: "uwa", name: "Water", groupName: "Utilities", isIncome: false }, { id: "uga", name: "Natural gas", groupName: "Utilities", isIncome: false }, { id: "pay", name: "Paycheck", groupName: "Income", isIncome: true }, { id: "groc", name: "Groceries", groupName: "Food", isIncome: false }, { id: "rent", name: "Mortgage", groupName: "Housing", isIncome: false }, { id: "gift", name: "Gifts", groupName: "Fun", isIncome: false }, { id: "dine", name: "Dining", groupName: "Food", isIncome: false }],
   txns, budget: new Map([["groc", 600], ["rent", 2900]]), payees: [],
 });
 const settings = new SettingsStore(path.join(dir, "settings.json"));
@@ -59,7 +59,7 @@ const utilities = new UtilityStore(path.join(dir, "utilities.json"));
     const ccf = Math.round(9 + sum * 9 + (k % 4)); bills.water.push({ utility: "water", periodStart: mo(y, m, 8), periodEnd: mo(y, m, 28), billDate: mo(y, m, 28), usage: ccf, amount: Math.round((ccf * 9.4 + 22) * 100) / 100, unit: "CCF", avgPerDay: Math.round((ccf * 748) / 20) }); }
   for (const l of Object.values(bills)) utilities.addBills(l);
   const payee = { electric: "Duke Energy", water: "City of Raleigh", gas: "Enbridge Gas" };
-  for (const [k, l] of Object.entries(bills)) for (const b of l) { const d = new Date(Date.parse(b.periodEnd + "T00:00:00Z") + (k === "water" ? 20 : 14) * 864e5).toISOString().slice(0, 10); if (d <= today) txns.push({ id: `u-${k}-${b.periodEnd}`, accountId: "chk", accountName: "Checking", date: d, amount: -b.amount, categoryId: null, transferAcctId: null, payeeName: payee[k], importedPayee: "", notes: k === "electric" ? "Autopay" : "" }); }
+  for (const [k, l] of Object.entries(bills)) for (const b of l) { const d = new Date(Date.parse(b.periodEnd + "T00:00:00Z") + (k === "water" ? 20 : 14) * 864e5).toISOString().slice(0, 10); if (d <= today) txns.push({ id: `u-${k}-${b.periodEnd}`, accountId: "chk", accountName: "Checking", date: d, amount: -b.amount, categoryId: { electric: "uel", water: "uwa", gas: "uga" }[k], transferAcctId: null, payeeName: payee[k], importedPayee: "", notes: k === "electric" ? "Autopay" : "" }); }
   const daily = []; for (let k = 120; k >= 1; k--) { const d = new Date(now.getTime() - k * 864e5); daily.push({ date: d.toISOString().slice(0, 10), usage: Math.round((22 + 18 * Math.abs(Math.sin(k / 9)) + (k % 7 === 0 ? 14 : 0)) * 10) / 10 }); } utilities.setDaily("electric", daily); }
 const balances = new BalanceStore(path.join(dir, "balances.json"));
 { for (let k = 40; k >= 0; k -= 5) { const d = new Date(now.getTime() - k * 864e5).toISOString().slice(0, 10), w = Math.sin(k) * 400;

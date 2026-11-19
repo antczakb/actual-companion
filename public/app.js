@@ -700,7 +700,7 @@ function utilitiesTab() {
         if (!paid.configured) return shown(h("b", {}, `${u.label} bill ending ${b.periodEnd}`), h("div", { class: "mute" }, "Connect Actual to see the payment for this bill."));
         const m = (paid.matches?.[u.key]?.[b.periodEnd] || []).map((id) => byId.get(id)).filter(Boolean);
         shown(h("b", {}, `${u.label} bill, ${b.periodStart ? b.periodStart + " to " : "ending "}${b.periodEnd}`), h("div", { class: "mute" }, [b.usage != null ? `${n1(b.usage)} ${u.unit}` : null, b.amount != null ? `billed ${usd(b.amount, 2)}` : null, b.dueDate ? `due ${b.dueDate}` : null].filter(Boolean).join(", ")),
-          m.length ? [h("div", {}, m.length === 1 ? "Payment in Actual:" : `Likely payments in Actual (closest in amount first):`), txTable(m)] : h("div", { class: "mute" }, `No payment matching this bill was found in Actual between ${b.periodEnd} and 50 days after it. Check the payee pattern in Settings (now "${r.payees[u.key]}").`), hint);
+          m.length ? [h("div", {}, m.length === 1 ? "Payment in Actual:" : `Likely payments in Actual (closest in amount first):`), txTable(m)] : h("div", { class: "mute" }, `No payment matching this bill was found in Actual between ${b.periodEnd} and 50 days after it. Check "How payments are found" in Settings (payee pattern now "${r.payees[u.key]}").`), hint);
       };
       const showMonth = (month) => { const m = txs.filter((t) => t.date.slice(0, 7) === month); shown(h("b", {}, `${u.label} payments in ${month}: ${usd(m.reduce((s, t) => s + t.amount, 0), 2)}`), txTable(m) || h("div", { class: "mute" }, "None."), hint); };
       const tbl = u.bills.length ? table([{ label: "Period end", render: (b) => h("button", { class: "linkish", title: "Show the payment for this bill", onclick: () => showBill(b) }, b.periodEnd), sort: (b) => b.periodEnd }, { label: "Period", render: (b) => (b.periodStart ? `${b.periodStart} to ${b.periodEnd}` : b.periodEnd), sort: (b) => b.periodStart || b.periodEnd }, { label: `Usage (${u.unit})`, num: 1, sort: (b) => b.usage ?? -1, render: (b) => n1(b.usage) }, { label: "Cost", num: 1, sort: (b) => b.amount ?? -1, render: (b) => (b.amount == null ? "" : usd(b.amount, 2)) }, { label: `$ per ${u.unit}`, num: 1, sort: (b) => b.perUnit ?? -1, render: (b) => (b.perUnit == null ? "" : usd(b.perUnit, 3)) }, { label: "Avg per day", num: 1, sort: (b) => b.avgPerDay ?? -1, render: (b) => n1(b.avgPerDay) },
@@ -723,7 +723,11 @@ function utilitiesTab() {
         u.bills.length || u.daily.length ? h("div", { class: "row actions" }, h("button", { class: "alt", onclick: async () => { if (confirm(`Remove all imported ${u.label.toLowerCase()} data? Your files are not touched.`)) { await api("/api/utilities/clear", { body: { utility: u.key } }); await load(); } } }, `Remove ${u.label.toLowerCase()} data`)) : null);
     }
   }
-  settingsBar(root, { title: "Payee patterns", fields: [{ path: "utilities.payees.electric", label: "Electric payee pattern", type: "text", tip: "Matches the payee name in Actual (case does not matter). Used to total what you paid." }, { path: "utilities.payees.water", label: "Water payee pattern", type: "text" }, { path: "utilities.payees.gas", label: "Gas payee pattern", type: "text" }], extra: null });
+  const catField = (k, l) => ({ path: `utilities.categories.${k}`, label: `${l}: Actual categories`, type: "categories", tip: "Payments in these Actual categories count as this utility. Used when 'How to find payments' includes categories." });
+  const payField = (k, l) => ({ path: `utilities.payees.${k}`, label: `${l}: payee pattern`, type: "text", tip: "Matches the payee name in Actual, any case. Several names: duke|progress. Used when 'How to find payments' includes payees." });
+  settingsBar(root, { title: "How payments are found", onSave: async () => { paid = null; await load(); }, fields: [
+    { path: "utilities.match", label: "How to find payments", type: "select", options: [["payee", "By payee name only"], ["category", "By Actual category only"], ["either", "Either payee or category"], ["both", "Both payee and category"]], hint: "\"Either\" finds more; \"Both\" is strictest and needs a payee pattern and a category for each utility." },
+    payField("electric", "Electric"), catField("electric", "Electric"), payField("water", "Water"), catField("water", "Water"), payField("gas", "Gas"), catField("gas", "Gas")] });
   root.append(h("div", { class: "card" }, h("h2", {}, "Import bills and usage"), h("div", { class: "row fields" }, h("label", {}, h("span", { class: "lbl" }, "Files (.xml, .csv, .pdf)"), file), h("label", {}, h("span", { class: "lbl" }, "Utility, for CSV files"), which), go), h("div", { class: "mute" }, "Duke Green Button XML (15-minute readings, becomes daily totals), Duke and gas usage CSVs, and Raleigh water PDF bills. Files are read on the server and only the figures are kept; names, addresses and account numbers are not stored."), msgs), out);
   load().catch((e) => fill(out, h("div", { class: "err" }, e.message)));
 }
@@ -837,7 +841,7 @@ function amazonTab() {
 // ---------- Per-tab settings ----------
 // Each tab has its own "Settings" button that opens a form for the settings that tab uses.
 // fields: {path, label, type: number|text|list|accounts|kv, scale?, nullable?, hint?, tip?, kvLabels?}
-function settingsBar(root, { fields = [], extra = null, title = "Settings" } = {}) {
+function settingsBar(root, { fields = [], extra = null, title = "Settings", onSave = null } = {}) {
   const btn = h("button", { class: "alt gear", "aria-expanded": "false" }, "⚙ " + title), box = h("div", { class: "card settings", hidden: true });
   let built = false, readers = [];
   const getPath = (o, p) => p.split(".").reduce((a, k) => (a == null ? a : a[k]), o);
@@ -845,12 +849,19 @@ function settingsBar(root, { fields = [], extra = null, title = "Settings" } = {
   async function build() {
     const S = await api("/api/settings"); let accts = [];
     if (fields.some((f) => f.type === "accounts")) { try { accts = (await api("/api/accounts")).filter((a) => !a.offbudget); } catch { accts = []; } }
+    let cats = []; if (fields.some((f) => f.type === "categories")) { try { cats = await api("/api/categories"); } catch { cats = []; } }
     readers = []; const msg = h("div"), grid = h("div", { class: "row fields" });
     for (const f of fields) {
       const v = getPath(S, f.path), scale = f.scale || 1; let el, read;
       if (f.type === "number") { el = h("input", { type: "number", class: "in", step: "any", inputmode: "decimal", value: v == null ? "" : Math.round(v * scale * 1e6) / 1e6, placeholder: f.nullable ? "none" : "" }); read = () => (el.value === "" ? (f.nullable ? null : 0) : Number(el.value) / scale); }
       else if (f.type === "text") { el = h("input", { type: "text", class: "in", value: v || "" }); read = () => el.value; }
       else if (f.type === "bool") { el = h("input", { type: "checkbox" }); el.checked = !!v; read = () => el.checked; }
+      else if (f.type === "select") { el = h("select", { class: "in" }, f.options.map(([val, label]) => h("option", { value: val, selected: val === v }, label))); read = () => el.value; }
+      else if (f.type === "categories") {
+        const chosen = new Set(v || []), boxes = cats.map((c) => { const k = h("input", { type: "checkbox" }); k.checked = chosen.has(c.id); return { c, k }; });
+        el = h("div", { class: "checks" }, boxes.length ? boxes.map(({ c, k }) => h("label", { class: "check" }, k, c.groupName ? `${c.groupName}: ${c.name}` : c.name)) : h("span", { class: "mute" }, "No categories available from Actual."));
+        read = () => boxes.filter(({ k }) => k.checked).map(({ c }) => c.id);
+      }
       else if (f.type === "time") { el = h("input", { type: "time", class: "in", value: v || "" }); read = () => el.value; }
       else if (f.type === "list") { el = h("input", { type: "text", class: "in", value: (v || []).join(", "), placeholder: "separate with commas" }); read = () => el.value.split(",").map((x) => x.trim()).filter(Boolean); }
       else if (f.type === "accounts") {
@@ -864,12 +875,12 @@ function settingsBar(root, { fields = [], extra = null, title = "Settings" } = {
         draw(); el = holder; read = () => Object.fromEntries(rows.filter((r) => r.k.trim() && r.val.trim()).map((r) => [r.k.trim(), r.val.trim()]));
       }
       readers.push([f.path, read]);
-      grid.append(h("label", { class: "setfield" + (f.type === "accounts" || f.type === "kv" ? " wide" : "") }, h("span", { class: "lbl" }, f.label, f.tip ? tip(f.tip) : null), el, f.hint ? h("small", { class: "mute" }, f.hint) : null));
+      grid.append(h("label", { class: "setfield" + (f.type === "accounts" || f.type === "kv" || f.type === "categories" ? " wide" : "") }, h("span", { class: "lbl" }, f.label, f.tip ? tip(f.tip) : null), el, f.hint ? h("small", { class: "mute" }, f.hint) : null));
     }
     const save = h("button", { class: "act" }, "Save settings");
     save.addEventListener("click", async () => {
       save.disabled = true; fill(msg);
-      try { const cur = await api("/api/settings"); for (const [path, read] of readers) setPath(cur, path, read()); await api("/api/settings", { method: "PUT", body: cur }); fill(msg, h("div", { class: "ok" }, "Saved. Run the calculation again to use the new values.")); }
+      try { const cur = await api("/api/settings"); for (const [path, read] of readers) setPath(cur, path, read()); await api("/api/settings", { method: "PUT", body: cur }); fill(msg, h("div", { class: "ok" }, onSave ? "Saved and applied." : "Saved. Run the calculation again to use the new values.")); if (onSave) await onSave(); }
       catch (e) { fill(msg, h("div", { class: "err" }, e.message)); } finally { save.disabled = false; }
     });
     fill(box, fields.length ? grid : null, extra ? extra() : null, fields.length ? h("div", { class: "row actions" }, save) : null, msg);

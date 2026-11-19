@@ -132,8 +132,8 @@ export function createHandlers(d) {
     "GET /api/utilities/payments": async () => {
       if (!actual.configured()) return { configured: false, payments: {} };
       const t = now(), start = `${t.getFullYear() - 3}-01-01`, tx = await actual.getTransactions(start, today()), P = settings.get().utilities.payees;
-      const view = utilities.view(), list = Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, paymentList(tx, P[k])]));
-      return { configured: true, actualUrl: actual.serverUrl || null, payments: Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, paymentsByMonth(tx, P[k])])), transactions: list,
+      const U = settings.get().utilities, view = utilities.view(), opt = (k) => ({ categoryIds: U.categories?.[k] || [], match: U.match }), list = Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, paymentList(tx, P[k], opt(k))]));
+      return { configured: true, actualUrl: actual.serverUrl || null, payments: Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, paymentsByMonth(tx, P[k], opt(k))])), transactions: list,
         matches: Object.fromEntries(Object.keys(UTILITIES).map((k) => [k, Object.fromEntries(view[k].bills.map((b) => [b.periodEnd, matchBillPayments(b, list[k])]))])) };
     },
 
@@ -151,6 +151,7 @@ export function createHandlers(d) {
 
     "GET /api/loan": async ({ query }) => computeLoan(query),
 
+    "GET /api/categories": async () => (await actual.getCategories()).filter((c) => !c.hidden && !c.isIncome).map((c) => ({ id: c.id, name: c.name, groupName: c.groupName })),
     "GET /api/accounts": async () => (await actual.getAccounts()).filter((x) => !x.closed).map((x) => ({ name: x.name, balance: x.balance, offbudget: x.offbudget })).sort((x, y) => x.name.localeCompare(y.name)),
 
     "GET /api/scenarios": async () => scenarios.list().map((r) => ({ id: r.id, name: r.name, savedAt: r.savedAt, plannedTotal: r.result.plannedTotal, recommended: r.result.recommended, borrow: r.result.borrow, totalCost: r.result.totalCost })),

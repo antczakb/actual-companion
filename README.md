@@ -187,3 +187,8 @@ Outside the Loan tab, click a column heading to sort ascending, then descending,
 
 - **Utilities: see the payment behind a chart point.** Click a point on the usage, cost or "Paid per month" chart, or a period end in the bills table. A panel shows the matching payment(s) from Actual (date, payee, account, amount, notes) with a link to the account in Actual. Actual cannot link to a single transaction, so the details are shown here. Bills match payments dated from 5 days before the period end to 50 days after, closest in amount first.
 - **Fix (issue #3):** the "Time to update ..." banner now clears when a value is pulled from changedetection.io (not only when typed by hand), and it refreshes right after any change on the Assets tab. Automatic estimates still do not count as checking the value.
+
+## v0.1.25: find utility payments by category
+
+- Utilities settings ("How payments are found") now has a mode: **payee name only** (default, as before), **Actual category only**, **either**, or **both**. Pick the Actual categories for each utility and/or the payee pattern. "Both" is the strictest and needs a payee pattern and a category for each utility.
+- Saving these settings now applies immediately and reloads the tab; no recalculation step is needed.

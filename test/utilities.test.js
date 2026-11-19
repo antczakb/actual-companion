@@ -107,3 +107,28 @@ test("matchBillPayments: window after the period end, closest amount first, wate
   assert.deepEqual(matchBillPayments({ periodEnd: "2026-10-01", amount: 401.35, totalDue: 501.35 }, paymentList([{ date: "2026-10-10", amount: -501.35, payeeName: "Raleigh", id: "w" }], "raleigh")), ["w"]);
   assert.deepEqual(matchBillPayments({ periodEnd: "2026-10-01", amount: null }, pays), ["a", "b", "c"]);
 });
+
+test("payment matching modes: payee, category, either, both", () => {
+  const tx = [{ id: "1", date: "2026-10-01", amount: -10, payeeName: "Duke Energy", categoryId: "cE" }, { id: "2", date: "2026-10-02", amount: -20, payeeName: "Some Autopay", categoryId: "cE" }, { id: "3", date: "2026-10-03", amount: -30, payeeName: "Duke Energy", categoryId: "other" }, { id: "4", date: "2026-10-04", amount: -40, payeeName: "Grocer", categoryId: null }];
+  const ids = (match, rx = "duke", cats = ["cE"]) => paymentList(tx, rx, { categoryIds: cats, match }).map((p) => p.id);
+  assert.deepEqual(ids("payee"), ["1", "3"]);
+  assert.deepEqual(ids("category"), ["1", "2"]);
+  assert.deepEqual(ids("either"), ["1", "2", "3"]);
+  assert.deepEqual(ids("both"), ["1"]);
+  assert.deepEqual(ids("both", "", ["cE"]), [], "both needs a payee pattern too");
+  assert.deepEqual(ids("category", "duke", []), []);
+  assert.deepEqual(paymentList(tx, "duke").map((p) => p.id), ["1", "3"], "default is payee only");
+});
+
+test("settings validate the match mode; categories route; payments route honours categories", async () => {
+  const dir = tmp(), settings = new SettingsStore(path.join(dir, "s.json"));
+  const s = settings.get(); s.utilities.match = "nope"; assert.throws(() => settings.set(s), /utilities.match/);
+  const t = [{ id: "t1", accountId: "a", accountName: "Chk", date: "2026-10-05", amount: -88, payeeName: "Some Autopay", importedPayee: "", notes: "", categoryId: "cW", transferAcctId: null }];
+  const actual = { configured: () => true, serverUrl: "http://actual", getTransactions: async () => t, getCategories: async () => [{ id: "cW", name: "Water", groupName: "Utilities", isIncome: false, hidden: false }, { id: "cI", name: "Pay", groupName: "Inc", isIncome: true, hidden: false }] };
+  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), utilities: new UtilityStore(path.join(dir, "u.json")), simplefin: {}, now: () => new Date("2026-11-14T12:00:00Z") });
+  assert.deepEqual(await h["GET /api/categories"]({}), [{ id: "cW", name: "Water", groupName: "Utilities" }]);
+  assert.equal((await h["GET /api/utilities/payments"]({})).transactions.water.length, 0, "payee-only by default");
+  const cur = settings.get(); cur.utilities.match = "category"; cur.utilities.categories.water = ["cW"]; settings.set(cur);
+  const r = await h["GET /api/utilities/payments"]({});
+  assert.equal(r.transactions.water.length, 1); assert.equal(r.payments.water[0].amount, 88); assert.equal(r.transactions.electric.length, 0);
+});

@@ -24,7 +24,7 @@ export const DEFAULT_SETTINGS = {
   venmo: { dayWindow: 5, payeeRegex: "venmo", keywordCategories: {} },
   amazon: { dayWindow: 7, payeeRegex: "amazon|amzn", keywordCategories: {} },
   simplefin: { startDaysBack: 90, cacheHours: 6 },
-  utilities: { payees: { electric: "duke energy", water: "raleigh", gas: "enbridge|piedmont" } }, // payee patterns used to find what you paid in Actual
+  utilities: { payees: { electric: "duke energy", water: "raleigh", gas: "enbridge|piedmont" }, categories: { electric: [], water: [], gas: [] }, match: "payee" }, // how payments are found in Actual: payee pattern and/or category; match = payee | category | either | both
   networth: { kinds: {} }, // SimpleFIN account id -> cash | investment | credit | loan | other-asset | ignore
   reminders: { enabled: true, day: 1 }, // monthly "update your home and vehicle values" reminder (banner, plus a push if NOTIFY_URL is set)
   snapshots: { enabled: true, time: "23:55" }, // end-of-day investment and asset snapshot, server local time
@@ -58,6 +58,8 @@ export function validateSettings(s) {
   }
   for (const [id, k] of Object.entries(s.networth?.kinds || {})) if (!["cash", "investment", "credit", "loan", "other-asset", "ignore"].includes(k)) errs.push(`networth.kinds.${id} is not a valid kind`);
   for (const k of ["electric", "water", "gas"]) { try { new RegExp(s.utilities?.payees?.[k] || ""); } catch { errs.push(`utilities.payees.${k} is not a valid pattern`); } }
+  if (!["payee", "category", "either", "both"].includes(s.utilities?.match)) errs.push("utilities.match must be payee, category, either or both");
+  for (const k of ["electric", "water", "gas"]) if (!Array.isArray(s.utilities?.categories?.[k])) errs.push(`utilities.categories.${k} must be a list`);
   if (s.reminders) { if (typeof s.reminders.enabled !== "boolean") errs.push("reminders.enabled must be true or false"); num(s.reminders.day, "reminders.day", 1, 28); }
   if (s.snapshots) { if (typeof s.snapshots.enabled !== "boolean") errs.push("snapshots.enabled must be true or false"); if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.snapshots.time || "")) errs.push("snapshots.time must look like 23:55"); }
   (s.projection?.existingLoans || []).forEach((x, i) => {
