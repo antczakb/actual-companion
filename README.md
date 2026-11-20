@@ -205,3 +205,7 @@ Outside the Loan tab, click a column heading to sort ascending, then descending,
 - **Weather**: daily temperature and rain for your location come from Open-Meteo's free historical archive (no account), fetched on import, on "Refresh weather" and in the nightly job, and only for days not already stored (the archive lags about 6 days). Set latitude and longitude in the Utilities settings (default: Raleigh city centre). Each bill gets average temperature, heating degree days, cooling degree days and rain; Duke's CSV temperature is used when weather is unavailable. Weather is stored in `weather.json`. The weather download could not be tried against the live service while building this; if it fails, the tab shows the error.
 - **Year over year**: each year is compared with the one before using only the months both have. The cost change is split into "used more or less" (at last year's rate) and "rate changed" (on this year's usage), plus the weather difference (warmer or cooler, cooling and heating need, wetter or drier).
 - Tables hide filter dropdowns on number columns and on tables under 6 rows.
+
+## v0.1.28: weather download diagnostics
+
+- When the weather service (or something between this server and it) answers with something that is not data, the error now shows the HTTP status and the first part of what came back, instead of a JSON parse error. Long ranges are fetched in year-sized requests.

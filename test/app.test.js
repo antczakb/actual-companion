@@ -37,7 +37,7 @@ function data() {
 function make(over = {}) {
   const dir = tmp(), actual = new FakeActual(data());
   const settings = new SettingsStore(path.join(dir, "s.json"));
-  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), utilities: new UtilityStore(path.join(dir, "u.json")), weather: new WeatherStore(path.join(dir, "w.json")), weatherFetch: async () => ({ ok: true, json: async () => ({ daily: { time: [] } }) }), assets: new AssetStore(path.join(dir, "a.json")), simplefin: { accessUrl: null }, now: () => NOW, ...over });
+  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), utilities: new UtilityStore(path.join(dir, "u.json")), weather: new WeatherStore(path.join(dir, "w.json")), weatherFetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ daily: { time: [] } }) }), assets: new AssetStore(path.join(dir, "a.json")), simplefin: { accessUrl: null }, now: () => NOW, ...over });
   return { h, actual, settings, dir };
 }
 

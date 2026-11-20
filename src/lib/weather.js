@@ -8,9 +8,12 @@ const addDays = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5)
 
 export async function fetchDailyWeather({ lat, lon, start, end, timeZone = "America/New_York", fetchImpl = fetch }) {
   const q = new URLSearchParams({ latitude: String(lat), longitude: String(lon), start_date: start, end_date: end, daily: "temperature_2m_mean,temperature_2m_max,temperature_2m_min,precipitation_sum", temperature_unit: "fahrenheit", precipitation_unit: "inch", timezone: timeZone });
-  let res; try { res = await fetchImpl(`https://archive-api.open-meteo.com/v1/archive?${q}`); } catch (e) { throw bad(`Could not reach the weather service: ${e.cause?.code || e.message}`); }
-  if (!res.ok) throw bad(`The weather service answered HTTP ${res.status}.`);
-  const j = await res.json(), d = j?.daily;
+  let res; try { res = await fetchImpl(`https://archive-api.open-meteo.com/v1/archive?${q}`, { headers: { "User-Agent": "actual-companion", Accept: "application/json" } }); } catch (e) { throw bad(`Could not reach the weather service (archive-api.open-meteo.com): ${e.cause?.code || e.message}. The server needs outbound internet access to that host.`); }
+  const text = await res.text(), snippet = text.replace(/\s+/g, " ").trim().slice(0, 160);
+  let j = null; try { j = JSON.parse(text); } catch { /* handled below with the start of what came back */ }
+  if (!res.ok) throw bad(j?.reason ? `Weather service said: ${j.reason}` : `The weather service answered HTTP ${res.status}${snippet ? `: ${snippet}` : ""}.`);
+  if (!j) throw bad(`The weather service answered, but not with data (HTTP ${res.status}). It said: "${snippet || "(empty)"}". A proxy, firewall or DNS filter between this server and archive-api.open-meteo.com can cause this.`);
+  const d = j?.daily;
   if (!d?.time) throw bad(j?.reason ? `Weather service: ${j.reason}` : "Unexpected answer from the weather service.");
   return d.time.map((date, i) => ({ date, tmean: d.temperature_2m_mean?.[i] ?? null, tmax: d.temperature_2m_max?.[i] ?? null, tmin: d.temperature_2m_min?.[i] ?? null, precip: d.precipitation_sum?.[i] ?? null })).filter((r) => r.tmean != null);
 }
@@ -36,7 +39,7 @@ export class WeatherStore {
     const need = [];
     if (!have.length) need.push([from, end]); else { if (from < first) need.push([from, addDays(first, -1)]); if (last < end) need.push([addDays(last, 1), end]); }
     let got = 0, total = have.length;
-    for (const [s, e] of need) { const rows = await fetchDailyWeather({ lat, lon, start: s, end: e, timeZone, fetchImpl }); got += rows.length; total = this.merge(rows, { lat, lon }); }
+    for (const [s0, e0] of need) for (let s = s0; s <= e0; s = addDays(s, 366)) { const e = addDays(s, 365) < e0 ? addDays(s, 365) : e0, rows = await fetchDailyWeather({ lat, lon, start: s, end: e, timeZone, fetchImpl }); got += rows.length; total = this.merge(rows, { lat, lon }); }
     return { days: got, total };
   }
 }

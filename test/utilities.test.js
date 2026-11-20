@@ -84,7 +84,7 @@ test("payments by month from Actual-style transactions", () => {
 
 test("upload route end to end through the HTTP server (raw body)", async () => {
   const dir = tmp();
-  const handlers = createHandlers({ actual: { configured: () => false }, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings: new SettingsStore(path.join(dir, "s.json")), scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), utilities: new UtilityStore(path.join(dir, "u.json")), weather: new WeatherStore(path.join(dir, "w.json")), weatherFetch: async () => ({ ok: true, json: async () => ({ daily: { time: [] } }) }), simplefin: {}, now: () => new Date("2026-11-14T12:00:00Z") });
+  const handlers = createHandlers({ actual: { configured: () => false }, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings: new SettingsStore(path.join(dir, "s.json")), scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), utilities: new UtilityStore(path.join(dir, "u.json")), weather: new WeatherStore(path.join(dir, "w.json")), weatherFetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ daily: { time: [] } }) }), simplefin: {}, now: () => new Date("2026-11-14T12:00:00Z") });
   const srv = createServer({ handlers, password: "" }).listen(0); await new Promise((r) => srv.once("listening", r));
   const base = `http://127.0.0.1:${srv.address().port}`;
   try {
@@ -126,7 +126,7 @@ test("settings validate the match mode; categories route; payments route honours
   const s = settings.get(); s.utilities.match = "nope"; assert.throws(() => settings.set(s), /utilities.match/);
   const t = [{ id: "t1", accountId: "a", accountName: "Chk", date: "2026-10-05", amount: -88, payeeName: "Some Autopay", importedPayee: "", notes: "", categoryId: "cW", transferAcctId: null }];
   const actual = { configured: () => true, serverUrl: "http://actual", getTransactions: async () => t, getCategories: async () => [{ id: "cW", name: "Water", groupName: "Utilities", isIncome: false, hidden: false }, { id: "cI", name: "Pay", groupName: "Inc", isIncome: true, hidden: false }] };
-  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), utilities: new UtilityStore(path.join(dir, "u.json")), weather: new WeatherStore(path.join(dir, "w.json")), weatherFetch: async () => ({ ok: true, json: async () => ({ daily: { time: [] } }) }), simplefin: {}, now: () => new Date("2026-11-14T12:00:00Z") });
+  const h = createHandlers({ actual, snaptrade: null, store: new SnapshotStore(path.join(dir, "i.json")), settings, scenarios: new ScenarioStore(path.join(dir, "sc.json")), balances: new BalanceStore(path.join(dir, "b.json")), assets: new AssetStore(path.join(dir, "a.json")), utilities: new UtilityStore(path.join(dir, "u.json")), weather: new WeatherStore(path.join(dir, "w.json")), weatherFetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ daily: { time: [] } }) }), simplefin: {}, now: () => new Date("2026-11-14T12:00:00Z") });
   assert.deepEqual(await h["GET /api/categories"]({}), [{ id: "cW", name: "Water", groupName: "Utilities" }]);
   assert.equal((await h["GET /api/utilities/payments"]({})).transactions.water.length, 0, "payee-only by default");
   const cur = settings.get(); cur.utilities.match = "category"; cur.utilities.categories.water = ["cW"]; settings.set(cur);
@@ -137,7 +137,7 @@ test("settings validate the match mode; categories route; payments route honours
 const day = (d, t, p = 0) => ({ date: d, tmean: t, tmax: t + 8, tmin: t - 8, precip: p });
 test("weather: fetch parsing, degree days, coverage, store refresh only fetches what is missing", async () => {
   const calls = [];
-  const fetchImpl = async (url) => { calls.push(String(url)); const u = new URL(url), s = u.searchParams.get("start_date"), e = u.searchParams.get("end_date"); const t = [], m = []; for (let d = Date.parse(s); d <= Date.parse(e); d += 864e5) { t.push(new Date(d).toISOString().slice(0, 10)); m.push(40); } return { ok: true, json: async () => ({ daily: { time: t, temperature_2m_mean: m, temperature_2m_max: m, temperature_2m_min: m, precipitation_sum: m.map(() => 0.1) } }) }; };
+  const fetchImpl = async (url) => { calls.push(String(url)); const u = new URL(url), s = u.searchParams.get("start_date"), e = u.searchParams.get("end_date"); const t = [], m = []; for (let d = Date.parse(s); d <= Date.parse(e); d += 864e5) { t.push(new Date(d).toISOString().slice(0, 10)); m.push(40); } return { ok: true, status: 200, text: async () => JSON.stringify({ daily: { time: t, temperature_2m_mean: m, temperature_2m_max: m, temperature_2m_min: m, precipitation_sum: m.map(() => 0.1) } }) }; };
   const rows = await fetchDailyWeather({ lat: 35.78, lon: -78.64, start: "2026-01-01", end: "2026-01-03", fetchImpl });
   assert.equal(rows.length, 3); assert.match(calls[0], /temperature_unit=fahrenheit/);
   const w = summarizeWeather([day("2026-01-01", 40, 0.5), day("2026-01-02", 80, 0.5)], "2026-01-01", "2026-01-02", 65);
@@ -149,7 +149,13 @@ test("weather: fetch parsing, degree days, coverage, store refresh only fetches 
   await ws.refresh({ ...loc, from: "2026-02-01" }); assert.equal(calls.length, n1, "nothing missing, no request");
   await ws.refresh({ ...loc, from: "2026-01-28", today: "2026-02-25" }); assert.equal(ws.all()[0].date, "2026-01-28"); assert.equal(ws.last(), "2026-02-19");
   await ws.refresh({ lat: 9, lon: 9, from: "2026-02-10", today: "2026-02-20", fetchImpl }); assert.equal(ws.all()[0].date, "2026-02-10", "new location starts over");
-  await assert.rejects(fetchDailyWeather({ lat: 1, lon: 1, start: "2026-01-01", end: "2026-01-02", fetchImpl: async () => ({ ok: false, status: 500 }) }), /HTTP 500/);
+  const reply = (status, body) => async () => ({ ok: status < 400, status, text: async () => body });
+  await assert.rejects(fetchDailyWeather({ lat: 1, lon: 1, start: "2026-01-01", end: "2026-01-02", fetchImpl: reply(500, "") }), /HTTP 500/);
+  await assert.rejects(fetchDailyWeather({ lat: 1, lon: 1, start: "2026-01-01", end: "2026-01-02", fetchImpl: reply(200, "Unexpected gateway page") }), /not with data \(HTTP 200\).*Unexpected gateway page/);
+  await assert.rejects(fetchDailyWeather({ lat: 1, lon: 1, start: "2026-01-01", end: "2026-01-02", fetchImpl: reply(400, '{"error":true,"reason":"Date out of range"}') }), /Date out of range/);
+  const long = []; const f2 = async (url) => { long.push(new URL(url).searchParams.get("start_date") + ">" + new URL(url).searchParams.get("end_date")); return reply(200, JSON.stringify({ daily: { time: [], temperature_2m_mean: [] } }))(); };
+  await new WeatherStore(path.join(tmp(), "w2.json")).refresh({ lat: 1, lon: 2, from: "2024-01-01", today: "2026-03-10", fetchImpl: f2 });
+  assert.ok(long.length >= 3, "a two-year range is split into year-sized requests: " + long.join(", "));
 });
 
 test("years table: same months only; usage effect plus rate effect equals the cost change; weather deltas", () => {
