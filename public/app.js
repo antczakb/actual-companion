@@ -673,12 +673,13 @@ function networthTab() {
 // ---- Utilities: years on top of one another, and year-over-year with weather and rate ----
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], YEAR_COLORS = ["#8a8f98", "#2a9d8f", "#c55a11", "#8a3ffc", "#d6a100", "#1f5fbf"];
 const UTIL_METRICS = [["usagePerDay", "Usage per day", (b) => (b.usage != null && b.days ? b.usage / b.days : null), false], ["usage", "Usage per bill", (b) => b.usage, false], ["amount", "Cost per bill", (b) => b.amount, true], ["rate", "Cost per unit (rate)", (b) => b.perUnit, false], ["temp", "Average temperature (F)", (b) => b.wx?.avgTemp ?? null, false], ["dd", "Heating + cooling degree days per day", (b) => (b.wx?.hdd == null ? null : (b.wx.hdd + b.wx.cdd) / b.days), false], ["rain", "Rain per day (inches)", (b) => (b.wx?.precip == null ? null : b.wx.precip / b.days), false]];
-function compareYears(u) {
+function compareYears(u, pays) {
+  const payBy = new Map((pays || []).map((p) => [p.month, p.amount]));
   const sel = h("select", { "aria-label": "What to compare" }, UTIL_METRICS.map(([k, l]) => h("option", { value: k }, l))), box = h("div");
   const draw = () => {
-    const [, label, f, money] = UTIL_METRICS.find((m) => m[0] === sel.value), years = [...new Set(u.bills.map((b) => +b.periodEnd.slice(0, 4)))].sort(), last = years.at(-1);
+    const [key, label, f0, money] = UTIL_METRICS.find((m) => m[0] === sel.value), f = key === "amount" ? (b) => b.amount ?? payBy.get(b.periodEnd.slice(0, 7)) ?? null : f0, years = [...new Set(u.bills.map((b) => +b.periodEnd.slice(0, 4)))].sort(), last = years.at(-1);
     const series = years.map((y, i) => { const v = Array(12).fill(null); for (const b of u.bills) if (+b.periodEnd.slice(0, 4) === y) v[+b.periodEnd.slice(5, 7) - 1] = f(b); return { name: String(y), color: y === last ? "#1f5fbf" : YEAR_COLORS[i % YEAR_COLORS.length], values: v, dash: y !== last && i < years.length - 2 }; });
-    fill(box, series.some((x) => x.values.some((v) => v != null)) ? lineChart(series, MONTH_ABBR, { money }) : h("div", { class: "mute" }, "No weather data for this yet. Check the weather settings, then press Refresh weather."), h("div", { class: "mute" }, `${label}, by the month each bill ends. The newest year is the solid blue line.`));
+    fill(box, series.some((x) => x.values.some((v) => v != null)) ? lineChart(series, MONTH_ABBR, { money }) : h("div", { class: "mute" }, ["temp", "dd", "rain"].includes(key) ? "No weather data for this yet. Check the weather settings, then press Refresh weather." : key === "amount" ? "No dollar amounts for these bills. Usage files (Duke CSV or XML) carry no cost. Connect Actual and set the payee or category in Settings, and the payments are used instead." : key === "rate" ? "Cost per unit needs both a cost and a usage on the same bill, and none has both." : "No usage on file for this metric."), h("div", { class: "mute" }, `${label}, by the month each bill ends. The newest year is the solid blue line.`));
   };
   sel.addEventListener("change", draw); draw();
   return h("div", {}, h("h3", {}, "All years on top of one another"), h("div", { class: "row" }, h("label", {}, h("span", { class: "lbl" }, "Show"), sel)), box);
@@ -752,7 +753,7 @@ function utilitiesTab() {
           pays.length > 1 ? h("div", {}, h("h3", {}, "Paid per month (from Actual)"), lineChart([{ name: "Paid", color: "#1a7f37", values: pays.map((x) => x.amount) }], pays.map((x) => x.month), { onPick: (i) => showMonth(pays[i].month) })) : null),
         h("div", { class: "mute" }, "Click a point on a chart, or a period end in the table, to see the payment behind it."), detail,
         paid && !paid.configured ? h("div", { class: "mute" }, "Connect Actual to see what you paid each month.") : null,
-        u.bills.length ? compareYears(u) : null,
+        u.bills.length ? compareYears(u, paid?.payments?.[u.key]) : null,
         u.bills.length ? yearTableCard(u) : null,
         tbl || h("div", { class: "mute" }, "No bills imported yet."),
         u.bills.length || u.daily.length ? h("div", { class: "row actions" }, h("button", { class: "alt", onclick: async () => { if (confirm(`Remove all imported ${u.label.toLowerCase()} data? Your files are not touched.`)) { await api("/api/utilities/clear", { body: { utility: u.key } }); await load(); } } }, `Remove ${u.label.toLowerCase()} data`)) : null);
