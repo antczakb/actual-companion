@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS = {
     cashAccounts: [], trailingMonths: 12, reserveMonths: 3, reserveFixed: null,
     incomeGrowthPct: 0, expenseInflationPct: 0, incomeOverride: null, expensesOverride: null, investingOverride: null,
     purchases: [],
+    milestones: [], // {name, month}
     bonuses: [],
     existingLoans: [], // {name, balanceAccount, balance, rate, payment, payoffMonth, payoffAmount|null, paymentInSpending}
     jobLoss: { enabled: false, startMonth: "", months: 6, incomePct: 0, severance: 0, expenseCutPct: 10, pauseInvesting: true },
@@ -79,6 +80,7 @@ export function validateSettings(s) {
   }
   (s.projection?.bonuses || []).forEach((b, i) => { if (!/^\d{4}-\d{2}$/.test(b.month || "")) errs.push(`projection.bonuses[${i}].month must look like 2027-03`); if (b.repeat && !["once", "yearly"].includes(b.repeat)) errs.push(`projection.bonuses[${i}].repeat must be once or yearly`); num(+b.amount, `projection.bonuses[${i}].amount`, 0); });
   (s.projection?.purchases || []).forEach((p, i) => { if (!/^\d{4}-\d{2}$/.test(p.month || "")) errs.push(`projection.purchases[${i}].month must look like 2027-06`); num(+p.amount, `projection.purchases[${i}].amount`, 0); });
+  (s.projection?.milestones || []).forEach((m, i) => { if (!/^\d{4}-\d{2}$/.test(m.month || "")) errs.push(`projection.milestones[${i}].month must look like 2030-08`); });
   const P = s.projection || {};
   num(P.trailingMonths, "projection.trailingMonths", 1, 60); num(P.reserveMonths, "projection.reserveMonths", 0, 36);
   num(P.incomeGrowthPct, "projection.incomeGrowthPct", -50, 100); num(P.expenseInflationPct, "projection.expenseInflationPct", -50, 100);

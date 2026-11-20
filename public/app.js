@@ -102,7 +102,7 @@ function chartHover(wrap, svg, W, xs, rows, hi) {
   svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", off);
   svg.addEventListener("pointerup", (ev) => { if (ev.pointerType !== "mouse") setTimeout(off, 2500); });
 }
-function lineChart(series, labels, { money = true, onPick = null } = {}) {
+function lineChart(series, labels, { money = true, onPick = null, markers = [] } = {}) {
   const W = 900, H = 260, L = 64, R = 12, T = 12, B = 26;
   const all = series.flatMap((s) => s.values).filter((v) => v != null);
   if (!all.length) return h("div", { class: "mute" }, "No data yet.");
@@ -114,6 +114,7 @@ function lineChart(series, labels, { money = true, onPick = null } = {}) {
   const step = Math.max(1, Math.ceil(labels.length / 8));
   labels.forEach((l, i) => { if (i % step === 0) svg.append(el("text", { x: X(i), y: H - 6, "text-anchor": "middle", "font-size": 11, fill: "currentColor", "fill-opacity": ".7" }, l)); });
   if (lo < 0 && hi > 0) svg.append(el("line", { x1: L, x2: W - R, y1: Y(0), y2: Y(0), stroke: "currentColor", "stroke-opacity": ".45" }));
+  markers.forEach((m, k) => { const x = X(m.index); svg.append(el("line", { x1: x, x2: x, y1: T, y2: H - B, stroke: "#8a3ffc", "stroke-width": 1.5, "stroke-dasharray": "4 3" }), el("text", { x: Math.min(x + 4, W - R - 4), y: T + 11 + (k % 3) * 13, "font-size": 11, "font-weight": 600, fill: "#8a3ffc", "text-anchor": x > W - 160 ? "end" : "start", ...(x > W - 160 ? { x: x - 4 } : {}) }, m.label)); });
   for (const s of series) {
     const pts = s.values.map((v, i) => (v == null ? null : `${X(i)},${Y(v)}`)).filter(Boolean).join(" ");
     svg.append(el("polyline", { points: pts, fill: "none", stroke: s.color, "stroke-width": 2, ...(s.dash ? { "stroke-dasharray": "6 4" } : {}) }));
@@ -221,13 +222,25 @@ function stressSection(r, useReserve) {
 }
 // Cash chart for the selected loan. Checkboxes add the cash line for each payoff strategy (paying the loan off faster uses more cash).
 const PLAN_COLORS = ["#1c7a3d", "#8a3ffc", "#d12771", "#0b8a8a", "#b28600", "#6f4e37", "#111111"];
+function milestonePoints(r) {
+  const labels = r.rows.map((x) => x.label), out = [];
+  for (const m of r.milestones || []) { const i = labels.indexOf(m.month); if (i >= 0) out.push({ label: m.name || m.month, index: i, month: m.month, row: r.rows[i] }); }
+  return out.sort((a, b) => a.index - b.index);
+}
+function milestoneCard(r) {
+  const all = r.milestones || [], pts = milestonePoints(r), hidden = all.filter((m) => !r.rows.some((x) => x.label === m.month)), end = r.rows.at(-1)?.label;
+  if (!all.length) return null;
+  return h("div", {}, h("h3", {}, "Money available at each milestone"),
+    pts.length ? table([{ label: "Milestone", render: (x) => x.label }, { label: "Month", key: "month" }, { label: "Cash, no loan", num: 1, render: (x) => usd(x.row.cash) }, { label: "Cash, with loan", num: 1, render: (x) => usd(x.row.cashWithLoan) }, { label: "Reserve target", num: 1, render: (x) => usd(x.row.reserve) }, { label: "Available above reserve", num: 1, tip: "Cash with the loan minus the reserve target. This is what could go to the life change without dipping into your safety cushion.", sort: (x) => x.row.cashWithLoan - x.row.reserve, render: (x) => h("span", { class: x.row.cashWithLoan - x.row.reserve < 0 ? "down" : "" }, usd(x.row.cashWithLoan - x.row.reserve)) }], pts, { stack: false }) : null,
+    hidden.length ? h("div", { class: "mute" }, `Not shown, outside the projection window (ends ${end || "n/a"}): ${hidden.map((m) => `${m.name || "Milestone"} ${m.month}`).join(", ")}. Increase the look-ahead (up to 120 months) to include them.`) : null);
+}
 function cashChart(r) {
-  const labels = r.rows.map((x) => x.label), plans = (r.payoff?.plans || []).filter((p) => p.cash);
+  const labels = r.rows.map((x) => x.label), markers = milestonePoints(r), plans = (r.payoff?.plans || []).filter((p) => p.cash);
   const base = [{ name: "Cash, no loan", color: "#888", dash: true, values: r.rows.map((x) => x.cash) }, { name: "Cash, with loan (minimum payments)", color: "#1f5fbf", values: r.rows.map((x) => x.cashWithLoan) }, { name: "Reserve target", color: "#c55a11", dash: true, values: r.rows.map((x) => x.reserve) }];
   const extra = plans.filter((p) => p.key !== "minimum").map((p, i) => ({ key: p.key, name: `Cash, ${p.name.toLowerCase()}`, color: PLAN_COLORS[i % PLAN_COLORS.length], values: p.cash }));
-  if (!extra.length) return lineChart(base, labels);
+  if (!extra.length) return lineChart(base, labels, { markers });
   const on = new Set(extra.filter((e) => e.key === r.payoff.bestKey).map((e) => e.key)), box = h("div"), chart = h("div");
-  const draw = () => fill(chart, lineChart([...base, ...extra.filter((e) => on.has(e.key))], labels));
+  const draw = () => fill(chart, lineChart([...base, ...extra.filter((e) => on.has(e.key))], labels, { markers }));
   fill(box, h("div", { class: "chartopts" }, h("span", { class: "mute" }, "Also plot cash for:"), extra.map((e) => {
     const c = h("input", { type: "checkbox" }); c.checked = on.has(e.key);
     c.addEventListener("change", () => { c.checked ? on.add(e.key) : on.delete(e.key); draw(); });
@@ -245,6 +258,7 @@ const TIPS = {
   existing: "Pay off a loan you already have (for example a car loan) in a month you choose. The payoff amount leaves your cash that month, which can make a new loan necessary; from then on the loan's monthly payment stops, so your cash flow improves. Leave Payoff amount blank and the app works out the remaining balance from your rate and payment. Tick \"In spending?\" if that payment already comes out of the accounts Actual averages for your spending; otherwise no monthly saving is counted.",
   jobloss: "A stress test, not a forecast. It re-runs your projection with a job loss: from the start month, only the share of income you enter keeps coming in (partner income, unemployment), spending drops by the percentage you enter, investing can pause, bonuses stop, and any severance arrives in the first month. Then it shows how low cash goes, when it would run out, and how the loan you are looking at changes that. Months out of work 0 means the rest of the look-ahead window.",
   bonuses: "Expected bonuses or other lump sums of cash coming in (after tax, as they land in your account). Each is added to projected cash in the month you pick. \"Every year\" repeats it every 12 months from that month. Your regular income already comes from Actual, so only enter bonuses that are NOT in your normal paychecks; a bonus you received in the last 12 months is already averaged into income.",
+  milestones: "Dates where your life could change. They show as purple dashed lines on the cash chart, and a table lists how much cash you would have then, with and without the loan, and how much of it is above your reserve. A milestone does not change the projection itself; add a planned purchase or bonus for the money the change costs or brings in.",
   purchases: "Large cash purchases you expect. Each one is subtracted from your projected cash in the month you pick. Loans are sized to cover the months where cash would otherwise fall below your floor.",
   situation: "Your cash, income, spending and investing come from Actual: cash is the balance of your on-budget accounts today; income, spending and investing are the average of the last 12 months of transactions (transfers to off-budget accounts count as investing, transfers between on-budget accounts are ignored).",
   homeValue: "Used for the equity limit on loans secured by your home: maximum loan = max combined LTV x home value - mortgage - other liens. Pick an Actual account to use its current balance, or type a value.",
@@ -291,7 +305,7 @@ async function loanTab() {
   ], extra: actualCheck });
   let S = await api("/api/settings"), selected = S.loan.product, accts = [], acctNote = "";
   try { accts = await api("/api/accounts"); } catch (e) { acctNote = "Could not read accounts from Actual (" + e.message + "). Enter values by hand."; }
-  const existingLoans = (S.projection.existingLoans || []).map((x) => ({ ...x })), jl = { ...S.projection.jobLoss }, bonuses = (S.projection.bonuses || []).map((b) => ({ ...b })), purchases = S.projection.purchases.map((p) => ({ ...p })), products = S.loan.products.map((p) => ({ ...p }));
+  const existingLoans = (S.projection.existingLoans || []).map((x) => ({ ...x })), jl = { ...S.projection.jobLoss }, bonuses = (S.projection.bonuses || []).map((b) => ({ ...b })), purchases = S.projection.purchases.map((p) => ({ ...p })), milestones = (S.projection.milestones || []).map((m) => ({ ...m })), products = S.loan.products.map((p) => ({ ...p }));
   const nextMonth = (k) => { const d = new Date(); d.setMonth(d.getMonth() + k); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); };
   const inp = (type, val, on, extra = {}) => { const e = h("input", { type, class: "in", step: "any", value: val ?? "", ...extra }); e.addEventListener("input", () => on(e)); return e; };
   const numOrNull = (e) => (e.value === "" ? null : Number(e.value));
@@ -455,6 +469,7 @@ async function loanTab() {
     syncExisting();
     s.projection.existingLoans = existingLoans.filter((x) => (x.name || "").trim() || +x.balance || x.balanceAccount).map((x) => ({ name: (x.name || "").trim() || "Loan", balanceAccount: x.balanceAccount || null, balance: +x.balance || 0, rate: x.rate || 0, payment: +x.payment || 0, payoffMonth: x.payoffMonth, payoffAmount: x.payoffAmount == null ? null : +x.payoffAmount, paymentInSpending: x.paymentInSpending !== false }));
     s.projection.jobLoss = { enabled: jlOn.checked, startMonth: jf.start.value, months: Math.max(0, Math.round(+jf.months.value || 0)), incomePct: Math.min(1, Math.max(0, (+jf.income.value || 0) / 100)), severance: +jf.sev.value || 0, expenseCutPct: Math.min(100, Math.max(0, +jf.cut.value || 0)), pauseInvesting: jlPause.checked };
+    s.projection.milestones = milestones.filter((m) => m.month).map((m) => ({ name: (m.name || "").trim(), month: m.month }));
     s.projection.purchases = purchases.filter((p) => p.month || +p.amount).map((p) => ({ name: p.name || "", month: p.month, amount: +p.amount || 0 }));
     s.loan.products = products.map((p) => ({ ...p, name: (p.name || "").trim() }));
     if (!s.loan.products.some((p) => p.name === selected)) selected = s.loan.products[0].name;
@@ -477,6 +492,7 @@ async function loanTab() {
   const payBox = h("div"), stressBox = h("div"), sumbar = h("div", { class: "sumbar", hidden: true });
   async function useReserve(m) { f.reserveMonths.value = m; f.protect.value = "Y"; await calc(true, false); }
   function render(r) {
+    r.milestones = milestones.filter((m) => m.month);
     const s = r.summary, a = r.assumptions, kp = (v, l, t) => h("div", { class: "kpi" }, h("b", {}, v), h("span", {}, l, t ? tip(t) : null));
     const rec = r.comparison.find((x) => x.recommended);
     const hero = s.verdict.code === "none-needed" ? h("div", { class: "verdict hero none-needed" }, h("div", { class: "big" }, "No loan needed"), h("div", { class: "bigsub" }, s.verdict.text)) :
@@ -507,7 +523,7 @@ async function loanTab() {
         kp(usd(s.maxLoanByEquity), "Max by home equity", TIPS.maxEquity), kp(s.drawLabel || "n/a", "Draw month", TIPS.draw), kp(s.firstBelowLabel || "None", "First month below floor", TIPS.firstBelow),
         kp(usd(s.worstShortfall), "Worst gap without a loan", TIPS.worstGap), kp(usd(s.paymentInterestOnly) + " / " + usd(s.paymentRepayment), "Payment: interest-only / repay", TIPS.payment),
         kp(pct(s.paymentPctOfSurplus), "Highest payment vs. surplus", TIPS.pctSurplus), kp(pct(s.combinedLtv), "Combined LTV", TIPS.ltv)),
-      cashChart(r),
+      cashChart(r), milestoneCard(r),
       stepH(null, "Month by month"),
       table([{ label: "Month", key: "label" }, { label: "Cash, no loan", num: 1, render: (x) => usd(x.cash) }, { label: "Bonuses", num: 1, render: (x) => (x.bonuses ? usd(x.bonuses) : "") }, { label: "Purchases", num: 1, render: (x) => usd(x.purchases) }, { label: "Reserve", num: 1, tip: "Reserve target = reserve months x that month's spending (or your fixed amount).", render: (x) => usd(x.reserve) },
         { label: "Cash, with loan", num: 1, tip: "Cash without the loan + (loan x (1 - fee % - payments so far per $1) - fixed fee).", render: (x) => usd(x.cashWithLoan) }, { label: "Loan payment", num: 1, render: (x) => usd(x.loanPayment) }, { label: "No loan", key: "statusNoLoan" }, { label: "With loan", key: "statusWithLoan" }], r.rows,
@@ -545,12 +561,24 @@ async function loanTab() {
   }
   go.addEventListener("click", () => calc(true));
   const field = (label, el, hint, t) => h("label", {}, h("span", { class: "lbl" }, label, t ? tip(t) : null), el, hint ? h("small", { class: "mute" }, hint) : null);
-  drawPurchases(); drawBonuses(); drawExisting(); drawProducts();
+  const mBox = h("div");
+  function drawMilestones() {
+    fill(mBox,
+      milestones.length ? h("div", { class: "tablewrap stackwrap" }, h("table", { class: "stack" }, h("thead", {}, h("tr", {}, ["Life change", "Month", ""].map((x) => h("th", {}, x)))),
+        h("tbody", {}, milestones.map((m, i) => h("tr", {},
+          h("td", { "data-label": "Life change" }, inp("text", m.name, (e) => (m.name = e.value), { placeholder: "e.g. Kid starts college" })),
+          h("td", { "data-label": "Month" }, inp("month", m.month, (e) => (m.month = e.value))),
+          h("td", { "data-label": "" }, h("button", { class: "alt", onclick: () => { milestones.splice(i, 1); drawMilestones(); } }, "Remove"))))))) :
+        h("div", { class: "mute" }, "None yet. Add dates where your life may change, such as a child starting college or a planned retirement."),
+      h("div", { class: "row actions" }, h("button", { class: "alt", onclick: () => { milestones.push({ name: "", month: nextMonth(12) }); drawMilestones(); } }, "+ Add milestone")));
+  }
+  drawPurchases(); drawBonuses(); drawExisting(); drawProducts(); drawMilestones();
   const inputs = h("div", { class: "pane" },
     h("div", { class: "intro" }, h("b", {}, "Plan a large purchase."), " Blue boxes are inputs; everything else is calculated. Your cash, income and spending are read from Actual. Hover or tap the ", tip("Like this: an explanation of how the number is worked out."), " marks to see how each number is calculated."),
     stepH(1, "Planned large purchases", TIPS.purchases), h("div", { class: "card" }, pBox),
     h("h3", {}, "Expected bonuses ", tip(TIPS.bonuses)), h("div", { class: "card" }, bBox),
     h("h3", {}, "Existing loans to pay off ", tip(TIPS.existing)), h("div", { class: "card" }, eBox),
+    h("h3", {}, "Milestones ", tip(TIPS.milestones)), h("div", { class: "card" }, mBox),
     stepH(2, "Your situation", TIPS.situation),
     h("div", { class: "card" }, acctNote ? h("div", { class: "warn" }, acctNote) : h("div", { class: "mute note" }, "Pick an Actual account to use its current balance (a mortgage shows as a positive amount owed), or choose Custom value and type a number."), h("div", { class: "row fields" },
       field("Home value: account", src.homeValue.sel, null, TIPS.homeValue), field("Home value ($)", src.homeValue.num), field("Mortgage: account", src.mortgage.sel), field("Mortgage balance ($)", src.mortgage.num),

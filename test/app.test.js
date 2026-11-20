@@ -184,6 +184,8 @@ test("settings validation: bonuses need a YYYY-MM month and a valid repeat", asy
   const { validateSettings } = await import("../src/config.js");
   assert.ok(validateSettings({ projection: { bonuses: [{ month: "March", amount: 1 }] } }).some((e) => /bonuses\[0\]\.month/.test(e)));
   assert.ok(validateSettings({ projection: { bonuses: [{ month: "2027-03", amount: 1, repeat: "weekly" }] } }).some((e) => /repeat/.test(e)));
+  assert.ok(validateSettings({ projection: { milestones: [{ name: "x", month: "soon" }] } }).some((e) => /milestones\[0\]\.month/.test(e)));
+  assert.ok(!validateSettings({ projection: { milestones: [{ name: "x", month: "2030-08" }] } }).some((e) => /milestones/.test(e)));
 });
 
 test("amazon: preview matches an order to a bank charge, apply writes notes and category, replaceCategory only when asked", async () => {

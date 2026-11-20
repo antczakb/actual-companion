@@ -42,6 +42,7 @@ s.projection.existingLoans = [{ name: "Truck loan", balanceAccount: null, balanc
 s.projection.jobLoss = { enabled: true, startMonth: ym(-4), months: 8, incomePct: 0.25, severance: 8000, expenseCutPct: 10, pauseInvesting: true };
 s.projection.bonuses = [{ name: "Annual bonus", month: ym(-2), amount: 12000, repeat: "yearly" }];
 s.projection.purchases = [{ month: ym(-5), amount: 85000, name: "Kitchen remodel" }, { month: ym(-14), amount: 30000, name: "Car" }];
+s.projection.milestones = [{ name: "Kid starts college", month: ym(-12) }, { name: "Retire", month: ym(-30) }, { name: "Far future", month: ym(-300) }];
 settings.set(s);
 const sample = { errors: [], accounts: [{ org: { name: "Demo Bank", domain: "demo.example" }, id: "ACT-1", name: "Checking", currency: "USD", balance: "24000.00", "available-balance": "23900.00", "balance-date": Math.floor(Date.now() / 1000),
   transactions: [{ id: "T1", posted: Math.floor(Date.now() / 1000) - 86400, amount: "-45.00", description: "VENMO PAYMENT 99", extra: { category: "transfer" } }, { id: "T2", posted: 0, amount: "-9.99", description: "PENDING", pending: true }] }] };
